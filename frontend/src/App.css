@@ -1,5 +1,5 @@
 /* 
-  Custom styles for 1sat.names app
+  Custom styles for 1sat.name app
   Most styling is handled by DaisyUI components
 */
 
@@ -9,3 +9,18 @@ body {
 }
 
 /* Additional custom styles can be added below if needed */
+
+/* Add CSS for Merriweather font */
+.merriweather {
+  font-family: 'Merriweather', serif;
+}
+
+.merriweather-bold {
+  font-family: 'Merriweather', serif;
+  font-weight: 700;
+}
+
+.merriweather-black {
+  font-family: 'Merriweather', serif;
+  font-weight: 900;
+}

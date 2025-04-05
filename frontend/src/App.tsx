@@ -1,71 +1,83 @@
-import { useState } from 'react'
 import './App.css'
-import Navbar from './components/Navbar'
-import NameRegistration from './components/NameRegistration'
-import Inventory from './components/Inventory'
-import WalletLogin from './components/WalletLogin'
+import Navbar, { type PageType } from './components/Navbar'
+import { useWallet } from './context/WalletContext'
+import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom'
+import HomePage from './pages/HomePage'
+import MarketPage from './pages/MarketPage'
+import SettingsPage from './pages/SettingsPage'
 
-function App() {
-  const [isWalletConnected, setIsWalletConnected] = useState(false)
-  const [walletAddress, setWalletAddress] = useState<string | undefined>(undefined)
-  const [ownedNames, setOwnedNames] = useState<Array<{ id: string; name: string }>>([])
-  const [currentPage, setCurrentPage] = useState(1)
-  const totalPages = Math.max(1, Math.ceil(ownedNames.length / 5))
+// Navigation wrapper to handle Navbar interactions
+const NavWrapper = () => {
+  const navigate = useNavigate();
+  const { isConnected, addresses, disconnectWallet, connectWallet, socialProfile, loadSocialProfile, hasValidAddresses } = useWallet();
 
-  // Mock data for demonstration
-  const mockNames = [
-    { id: '1', name: 'alice@1satnames.com' },
-    { id: '2', name: 'bob@1satnames.com' },
-    { id: '3', name: 'carol@1satnames.com' },
-    { id: '4', name: 'dave@1satnames.com' },
-    { id: '5', name: 'eve@1satnames.com' },
-  ]
+  // Determine display address
+  const displayAddress = addresses.bsvAddress || addresses.ordAddress || '';
 
-  const connectWallet = () => {
-    // In a real app, this would use a wallet connection library
-    setIsWalletConnected(true)
-    setWalletAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq')
-    setOwnedNames(mockNames)
-  }
+  // Handle navigation from Navbar
+  const handleNavigation = (page: PageType) => {
+    switch (page) {
+      case 'home':
+        navigate('/');
+        break;
+      case 'market':
+        navigate('/market');
+        break;
+      case 'settings':
+        navigate('/settings');
+        break;
+    }
+  };
 
-  const handleBuy = (name: string) => {
-    // In a real app, this would interact with a blockchain
-    console.log(`Buying name: ${name}`)
-    const newId = String(ownedNames.length + 1)
-    setOwnedNames([...ownedNames, { id: newId, name }])
-  }
-
-  const handleSell = (id: string) => {
-    // In a real app, this would interact with a blockchain
-    console.log(`Selling name with id: ${id}`)
-    setOwnedNames(ownedNames.filter(item => item.id !== id))
+  // Get current page from URL
+  const pathname = window.location.pathname;
+  let currentPage: PageType = 'home';
+  
+  if (pathname.includes('market')) {
+    currentPage = 'market';
+  } else if (pathname.includes('settings')) {
+    currentPage = 'settings';
   }
 
   return (
-    <div className="min-h-screen bg-base-100 text-base-content">
+    <>
       <Navbar 
-        isConnected={isWalletConnected}
-        walletAddress={walletAddress}
+        isConnected={isConnected}
+        walletAddress={displayAddress}
         onConnectWallet={connectWallet}
+        onDisconnectWallet={disconnectWallet}
+        avatar={socialProfile.avatar}
+        refreshProfile={loadSocialProfile}
+        onNavigate={handleNavigation}
+        currentPage={currentPage}
+        hasValidAddresses={hasValidAddresses}
       />
       
-      <main className="container mx-auto px-4 py-8">
-        <NameRegistration onBuy={handleBuy} />
-        
-        {isWalletConnected ? (
-          <Inventory
-            names={ownedNames}
-            onSell={handleSell}
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-          />
-        ) : (
-          <WalletLogin onLogin={connectWallet} />
-        )}
+      <main className="container mx-auto py-8 px-4">
+        <div className="max-w-4xl mx-auto">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/market" element={<MarketPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+        </div>
       </main>
-    </div>
-  )
+      
+      <footer className="container mx-auto py-8 px-4 text-center">
+        <p>© 2025 <span className="merriweather-bold text-content-primary">1SAT.NAME</span> - Built on Bitcoin SV</p>
+      </footer>
+    </>
+  );
+};
+
+function App() {
+  return (
+    <Router>
+      <div className="min-h-screen bg-base-100">
+        <NavWrapper />
+      </div>
+    </Router>
+  );
 }
 
 export default App
