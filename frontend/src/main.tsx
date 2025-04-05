@@ -4,6 +4,7 @@ import App from './App.tsx'
 import './index.css'
 import { WalletProvider } from './context/WalletContext'
 import { YoursProvider } from 'yours-wallet-provider'
+import { StripeProvider } from './context/StripeContext'
 
 // Initialize theme from localStorage or default to user preference or 'light'
 const initializeTheme = () => {
@@ -31,7 +32,9 @@ ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <YoursProvider>
       <WalletProvider>
-        <App />
+        <StripeProvider>
+          <App />
+        </StripeProvider>
       </WalletProvider>
     </YoursProvider>
   </React.StrictMode>,
