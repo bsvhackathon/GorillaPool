@@ -20,9 +20,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   const [isCheckingName, setIsCheckingName] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isFocused, setIsFocused] = useState(false);
-  const [directOrdAddress, setDirectOrdAddress] = useState<string | null>(null);
-  
+  const [isFocused, setIsFocused] = useState(false);  
   // New state for Stripe payment modal
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   
@@ -32,7 +30,6 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     isProcessing, 
     addresses, 
     connectWallet, 
-    fetchAddresses 
   } = useWallet();
   const wallet = useYoursWallet();
   
