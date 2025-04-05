@@ -1,4 +1,4 @@
-package overlay
+package opns
 
 import (
 	"context"
@@ -10,11 +10,12 @@ import (
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/b-open-io/bsv21-overlay/lookups/events"
-	"github.com/bitcoin-sv/go-sdk/script"
+	"github.com/bitcoin-sv/go-templates/template/inscription"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
+	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
-	"github.com/bsvhackathon/GorillaPool/overlay/opns"
+	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -40,7 +41,7 @@ type Question struct {
 	Reverse  bool      `json:"rev"`
 }
 
-type RedisEventLookup struct {
+type LookupService struct {
 	db      *redis.Client
 	storage engine.Storage
 }
@@ -53,8 +54,8 @@ func outpointEventsKey(outpoint *overlay.Outpoint) string {
 	return "oe:" + outpoint.String()
 }
 
-func NewRedisEventLookup(connString string, storage engine.Storage) (*RedisEventLookup, error) {
-	r := &RedisEventLookup{
+func NewLookupService(connString string, storage engine.Storage) (*LookupService, error) {
+	r := &LookupService{
 		storage: storage,
 	}
 	if opts, err := redis.ParseURL(connString); err != nil {
@@ -65,40 +66,23 @@ func NewRedisEventLookup(connString string, storage engine.Storage) (*RedisEvent
 	}
 }
 
-func (l *RedisEventLookup) OutputAdded(ctx context.Context, outpoint *overlay.Outpoint, outputScript *script.Script, topic string, blockHeight uint32, blockIdx uint64) error {
-	if o, _ := opns.Decode(outputScript); o != nil {
-		events := make([]string, 0, 5)
-		// if b.Op == string(bsv21.OpMint) {
-		// 	b.Id = outpoint.OrdinalString()
-		// 	if b.Symbol != nil {
-		// 		events = append(events, fmt.Sprintf("sym:%s", *b.Symbol))
-		// 	}
-		// }
-		// events = append(events, fmt.Sprintf("id:%s", b.Id))
-		// suffix := script.NewFromBytes(b.Insc.ScriptSuffix)
-		// if p := p2pkh.Decode(suffix, true); p != nil {
-		// 	events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
-		// } else if c := cosign.Decode(suffix); c != nil {
-		// 	events = append(events, fmt.Sprintf("cos:%s", c.Address))
-		// 	events = append(events, fmt.Sprintf("cos:%s", c.Cosigner))
-		// } else if ltm := ltm.Decode(suffix); ltm != nil {
-		// 	events = append(events, fmt.Sprintf("ltm:%s", b.Id))
-		// } else if pow20 := pow20.Decode(suffix); pow20 != nil {
-		// 	events = append(events, fmt.Sprintf("pow20:%s", b.Id))
-		// } else if ordLock := ordlock.Decode(suffix); ordLock != nil {
-		// 	if ordLock.Seller != nil {
-		// 		events = append(events, fmt.Sprintf("list:%s", ordLock.Seller.AddressString))
-		// 	}
-		// 	events = append(events, fmt.Sprintf("list:%s", b.Id))
-		// }
-		// if err := l.SaveEvents(ctx, outpoint, events, blockHeight, blockIdx); err != nil {
-		// 	return err
-		// }
+func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpoint, outputScript *script.Script, topic string, blockHeight uint32, blockIdx uint64) error {
+	events := make([]string, 0, 5)
+	if o := Decode(outputScript); o != nil {
+		events = append(events, "mine:"+o.Domain)
+	} else if insc := inscription.Decode(outputScript); insc != nil && insc.File.Type == "application/op-ns" {
+		events = append(events, "opns:"+string(insc.File.Content))
+		if p := p2pkh.Decode(script.NewFromBytes(insc.ScriptSuffix), true); p != nil {
+			events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
+		}
+	} else if p := p2pkh.Decode(outputScript, true); p != nil {
+		events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
 	}
+
 	return nil
 }
 
-func (l *RedisEventLookup) SaveEvent(ctx context.Context, outpoint *overlay.Outpoint, event string, height uint32, idx uint64) error {
+func (l *LookupService) SaveEvent(ctx context.Context, outpoint *overlay.Outpoint, event string, height uint32, idx uint64) error {
 	var score float64
 	if height > 0 {
 		score = float64(height)*1e9 + float64(idx)
@@ -121,7 +105,7 @@ func (l *RedisEventLookup) SaveEvent(ctx context.Context, outpoint *overlay.Outp
 	return err
 
 }
-func (l *RedisEventLookup) SaveEvents(ctx context.Context, outpoint *overlay.Outpoint, events []string, height uint32, idx uint64) error {
+func (l *LookupService) SaveEvents(ctx context.Context, outpoint *overlay.Outpoint, events []string, height uint32, idx uint64) error {
 	var score float64
 	if height > 0 {
 		score = float64(height)*1e9 + float64(idx)
@@ -145,13 +129,13 @@ func (l *RedisEventLookup) SaveEvents(ctx context.Context, outpoint *overlay.Out
 	})
 	return err
 }
-func (l *RedisEventLookup) Close() {
+func (l *LookupService) Close() {
 	if l.db != nil {
 		l.db.Close()
 	}
 }
 
-func (l *RedisEventLookup) Lookup(ctx context.Context, q *lookup.LookupQuestion) (answer *lookup.LookupAnswer, err error) {
+func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (answer *lookup.LookupAnswer, err error) {
 	question := &events.Question{}
 	if err := json.Unmarshal(q.Query, question); err != nil {
 		return nil, err
@@ -260,11 +244,11 @@ func (l *RedisEventLookup) Lookup(ctx context.Context, q *lookup.LookupQuestion)
 
 }
 
-func (l *RedisEventLookup) OutputSpent(ctx context.Context, outpoint *overlay.Outpoint, _ string) error {
+func (l *LookupService) OutputSpent(ctx context.Context, outpoint *overlay.Outpoint, _ string) error {
 	return l.db.SAdd(ctx, eventKey("spent"), outpoint.String()).Err()
 }
 
-func (l *RedisEventLookup) OutputsSpent(ctx context.Context, outpoints []*overlay.Outpoint, _ string) error {
+func (l *LookupService) OutputsSpent(ctx context.Context, outpoints []*overlay.Outpoint, _ string) error {
 	args := make([]interface{}, 0, len(outpoints))
 	for _, outpoint := range outpoints {
 		args = append(args, outpoint.Bytes())
@@ -272,7 +256,7 @@ func (l *RedisEventLookup) OutputsSpent(ctx context.Context, outpoints []*overla
 	return l.db.SAdd(ctx, eventKey("spent"), args...).Err()
 }
 
-func (l *RedisEventLookup) OutputDeleted(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
+func (l *LookupService) OutputDeleted(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
 	op := outpoint.String()
 	if events, err := l.db.SMembers(ctx, outpointEventsKey(outpoint)).Result(); err != nil {
 		return err
@@ -291,7 +275,7 @@ func (l *RedisEventLookup) OutputDeleted(ctx context.Context, outpoint *overlay.
 	}
 }
 
-func (l *RedisEventLookup) OutputBlockHeightUpdated(ctx context.Context, outpoint *overlay.Outpoint, height uint32, idx uint64) error {
+func (l *LookupService) OutputBlockHeightUpdated(ctx context.Context, outpoint *overlay.Outpoint, height uint32, idx uint64) error {
 	var score float64
 	if height > 0 {
 		score = float64(height)*1e9 + float64(idx)
@@ -319,11 +303,11 @@ func (l *RedisEventLookup) OutputBlockHeightUpdated(ctx context.Context, outpoin
 	}
 }
 
-func (l *RedisEventLookup) GetDocumentation() string {
+func (l *LookupService) GetDocumentation() string {
 	return "Events lookup"
 }
 
-func (l *RedisEventLookup) GetMetaData() *overlay.MetaData {
+func (l *LookupService) GetMetaData() *overlay.MetaData {
 	return &overlay.MetaData{
 		Name: "Events",
 	}

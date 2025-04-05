@@ -5,8 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -20,7 +18,7 @@ import (
 
 const DIFFICULTY = 22
 
-var genesis, _ = hex.DecodeString("25cb9c17772641ba2374a8d74f729aad921932fef5e2c76642f279a38e55b75800000000")
+var GENESIS, _ = overlay.NewOutpointFromString("25cb9c17772641ba2374a8d74f729aad921932fef5e2c76642f279a38e55b758_0")
 
 var comp = big.NewInt(0)
 
@@ -44,30 +42,30 @@ type OpnsUnlocker struct {
 	OwnerScript *script.Script `json:"ownerScript"`
 }
 
-func Decode(s *script.Script) (*Opns, error) {
+func Decode(s *script.Script) *Opns {
 	if !bytes.HasPrefix(*s, contract) {
-		return nil, errors.New("invalid script")
+		return nil
 	}
 	pos := len(contract) + 2
 
 	o := &Opns{}
 	if opGenesis, err := s.ReadOp(&pos); err != nil {
-		return nil, err
-	} else if !bytes.Equal(opGenesis.Data, genesis) {
-		return nil, errors.New("invalid genesis")
+		return nil
+	} else if !bytes.Equal(opGenesis.Data, GENESIS.TxBytes()) {
+		return nil
 	} else if opClaimed, err := s.ReadOp(&pos); err != nil {
-		return nil, err
+		return nil
 	} else if opDomain, err := s.ReadOp(&pos); err != nil {
-		return nil, err
+		return nil
 	} else if opPow, err := s.ReadOp(&pos); err != nil {
-		return nil, err
+		return nil
 	} else {
 		o.Claimed = opClaimed.Data
 		o.Domain = string(opDomain.Data)
 		o.Pow = opPow.Data
 		o.LockingScript = s
 	}
-	return o, nil
+	return o
 }
 
 func (o *Opns) BuildUnlockTx(outpoint *overlay.Outpoint, char byte, ownerScript *script.Script) (*transaction.Transaction, error) {
@@ -124,14 +122,14 @@ func (o *Opns) BuildInscription(domain string, ownerScript *script.Script) *scri
 	lockingScript.AppendPushData([]byte(domain))
 	lockingScript.AppendOpcodes(script.OpENDIF, script.OpRETURN)
 	lockingScript.AppendPushData([]byte("1opNSUJVbBc2Vf8LFNSoywGGK4jMcGVrC"))
-	lockingScript.AppendPushData(genesis)
+	lockingScript.AppendPushData(GENESIS.TxBytes())
 	return lockingScript
 }
 
 func Lock(claimed []byte, domain string, pow []byte) *script.Script {
 	state := script.NewFromBytes([]byte{})
 	state.AppendOpcodes(script.OpRETURN, script.OpFALSE)
-	state.AppendPushData(genesis)
+	state.AppendPushData(GENESIS.TxBytes())
 	state.AppendPushData(claimed)
 	state.AppendPushData([]byte(domain))
 	state.AppendPushData(pow)
