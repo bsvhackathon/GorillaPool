@@ -1,0 +1,11 @@
+/* 
+  Custom styles for 1sat.names app
+  Most styling is handled by DaisyUI components
+*/
+
+/* Fix for body layout */
+body {
+  display: block;
+}
+
+/* Additional custom styles can be added below if needed */
