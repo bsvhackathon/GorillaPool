@@ -238,6 +238,44 @@ func main() {
 		}
 	})
 
+	app.Get("/owner/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+		if name == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing name",
+			})
+		}
+		question := &opns.Question{
+			Event: "opns:" + name,
+			Spent: &engine.FALSE,
+		}
+		if outputs, err := lookupService.LookupOutputs(c.Context(), question); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		} else if len(outputs) == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "No answer found",
+			})
+		} else if events, err := lookupService.FindEvents(c.Context(), &outputs[0].Outpoint); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		} else {
+			var address string
+			for _, event := range events {
+				if strings.HasPrefix(event, "opns:"+name) {
+					address = strings.TrimPrefix(event, "opns:")
+				}
+			}
+
+			return c.JSON(fiber.Map{
+				"address":  address,
+				"outpoint": outputs[0].Outpoint.String(),
+			})
+		}
+	})
+
 	app.Get("/mine/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
 		if name == "" {
@@ -248,31 +286,17 @@ func main() {
 		question := &opns.Question{
 			Event: "mine:" + name,
 		}
-		if b, err := json.Marshal(question); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid question",
-			})
-		} else if answer, err := e.Lookup(c.Context(), &lookup.LookupQuestion{
-			Service: "ls_OpNS",
-			Query:   json.RawMessage(b),
-		}); err != nil {
+		if outputs, err := lookupService.LookupOutputs(c.Context(), question); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": err.Error(),
 			})
-		} else if len(answer.Outputs) == 0 {
+		} else if len(outputs) == 0 {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "No answer found",
 			})
-		} else if tx, err := transaction.NewTransactionFromBEEF(answer.Outputs[0].Beef); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid transaction",
-			})
 		} else {
 			return c.JSON(fiber.Map{
-				"outpoint": (&overlay.Outpoint{
-					Txid:        *tx.TxID(),
-					OutputIndex: answer.Outputs[0].OutputIndex,
-				}).String(),
+				"outpoint": outputs[0].Outpoint.String(),
 			})
 		}
 	})
