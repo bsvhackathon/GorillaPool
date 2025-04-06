@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
-	"github.com/b-open-io/bsv21-overlay/lookups/events"
 	"github.com/bitcoin-sv/go-templates/template/inscription"
 	"github.com/bitcoin-sv/go-templates/template/ordlock"
 	"github.com/bsv-blockchain/go-sdk/overlay"
@@ -184,16 +183,11 @@ func (l *LookupService) Close() {
 	}
 }
 
-func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (answer *lookup.LookupAnswer, err error) {
-	question := &events.Question{}
-	if err := json.Unmarshal(q.Query, question); err != nil {
-		return nil, err
-	}
-
+func (l *LookupService) LookupOutputs(ctx context.Context, question *Question) (outputs []*engine.Output, err error) {
 	startScore := float64(question.From.Height)*1e9 + float64(question.From.Idx)
-	var outpoints []string
-	if question.Events != nil && len(question.Events) > 0 {
-		join := events.JoinTypeIntersect
+	var ops []string
+	if len(question.Events) > 0 {
+		join := JoinTypeIntersect
 		if question.JoinType != nil {
 			join = *question.JoinType
 		}
@@ -201,19 +195,19 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 		for _, event := range question.Events {
 			keys = append(keys, EventKey(event))
 		}
-		results := make([]redis.Z, 0)
+		var results []redis.Z
 		switch join {
-		case events.JoinTypeIntersect:
+		case JoinTypeIntersect:
 			results, err = l.db.ZInterWithScores(ctx, &redis.ZStore{
 				Aggregate: "MIN",
 				Keys:      keys,
 			}).Result()
-		case events.JoinTypeUnion:
+		case JoinTypeUnion:
 			results, err = l.db.ZUnionWithScores(ctx, redis.ZStore{
 				Aggregate: "MIN",
 				Keys:      keys,
 			}).Result()
-		case events.JoinTypeDifference:
+		case JoinTypeDifference:
 			results, err = l.db.ZDiffWithScores(ctx, keys...).Result()
 		default:
 			return nil, errors.New("invalid join type")
@@ -238,12 +232,12 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 			return 0
 		})
 		for _, item := range results {
-			if question.Limit > 0 && len(outpoints) >= question.Limit {
+			if question.Limit > 0 && len(ops) >= question.Limit {
 				break
 			} else if question.Reverse && item.Score < startScore {
-				outpoints = append(outpoints, item.Member.(string))
+				ops = append(ops, item.Member.(string))
 			} else if !question.Reverse && item.Score > startScore {
-				outpoints = append(outpoints, item.Member.(string))
+				ops = append(ops, item.Member.(string))
 			}
 		}
 	} else if question.Event != "" {
@@ -255,42 +249,65 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 			Rev:     question.Reverse,
 			Count:   int64(question.Limit),
 		}
-		if outpoints, err = l.db.ZRangeArgs(ctx, query).Result(); err != nil {
+		if ops, err = l.db.ZRangeArgs(ctx, query).Result(); err != nil {
 			return nil, err
 		}
 	}
+	outpoints := make([]*overlay.Outpoint, 0, len(ops))
+	for _, op := range ops {
+		if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
+			return nil, err
+		} else {
+			outpoints = append(outpoints, outpoint)
+		}
+	}
+	if len(outpoints) == 0 {
+		return nil, nil
+	}
+	outputs, err = l.storage.FindOutputs(ctx, outpoints, &l.topic, question.Spent, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return outputs, nil
+}
+
+func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (answer *lookup.LookupAnswer, err error) {
+	question := &Question{}
+	if err := json.Unmarshal(q.Query, question); err != nil {
+		return nil, err
+	}
+	outputs, err := l.LookupOutputs(ctx, question)
+	if err != nil {
+		return nil, err
+	}
+
 	answer = &lookup.LookupAnswer{
 		Type: lookup.AnswerTypeOutputList,
 	}
-	for _, op := range outpoints {
-		if outpoint, err := overlay.NewOutpointFromString(op); err != nil {
-			return nil, err
-		} else if outpoint != nil {
-			if output, err := l.storage.FindOutput(ctx, outpoint, nil, nil, true); err != nil {
+
+	for _, output := range outputs {
+		if output != nil {
+			if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
 				return nil, err
-			} else if output != nil {
-				if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
+			} else {
+				if output.AncillaryBeef != nil {
+					if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
+						return nil, err
+					}
+				}
+				if beefBytes, err := beef.AtomicBytes(&output.Outpoint.Txid); err != nil {
 					return nil, err
 				} else {
-					if output.AncillaryBeef != nil {
-						if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
-							return nil, err
-						}
-					}
-					if beefBytes, err := beef.AtomicBytes(&outpoint.Txid); err != nil {
-						return nil, err
-					} else {
-						answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
-							OutputIndex: output.Outpoint.OutputIndex,
-							Beef:        beefBytes,
-						})
-					}
+					answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
+						OutputIndex: output.Outpoint.OutputIndex,
+						Beef:        beefBytes,
+					})
 				}
 			}
 		}
 	}
 	return answer, nil
-
 }
 
 func (l *LookupService) OutputSpent(ctx context.Context, outpoint *overlay.Outpoint, _ string) error {
@@ -321,6 +338,14 @@ func (l *LookupService) OutputDeleted(ctx context.Context, outpoint *overlay.Out
 			return p.Del(ctx, OutpointEventsKey(outpoint)).Err()
 		})
 		return err
+	}
+}
+
+func (l *LookupService) FindEvents(ctx context.Context, outpoint *overlay.Outpoint) ([]string, error) {
+	if events, err := l.db.SMembers(ctx, OutpointEventsKey(outpoint)).Result(); err != nil {
+		return nil, err
+	} else {
+		return events, nil
 	}
 }
 
