@@ -170,7 +170,7 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
   }
   
   return (
-    <div className="card bg-base-200 shadow-xl mb-8">
+    <div className="card bg-base-200 shadow-xl mb-8 max-w-2xl mx-auto">
       <div className="card-body">
         <h2 className="card-title">
           <span className="merriweather-bold text-2xl text-primary">Your 1sat Names</span>
