@@ -233,13 +233,13 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       const response = await fetch(`${apiUrl}/register`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: JSON.stringify({
+        body: new URLSearchParams({
           handle,
           // Include wallet information if needed by the API
           address: addresses?.bsvAddress || ''
-        })
+        }).toString()
       });
 
       if (!response.ok) {
@@ -313,15 +313,15 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         const response = await fetch(`${apiUrl}/create-checkout-session`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: JSON.stringify({
+          body: new URLSearchParams({
             productId: stripeProductId,
             name: nameInput,
-            price: priceUsd * 100, // Convert to cents
+            price: (priceUsd * 100).toString(), // Convert to cents and to string
             success_url: `${window.location.origin}${window.location.pathname}?success=true`,
             cancel_url: `${window.location.origin}${window.location.pathname}?canceled=true`,
-          }),
+          }).toString(),
         });
 
         if (!response.ok) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -273,26 +274,25 @@ func main() {
 
 	// Stripe checkout session endpoint
 	app.Post("/create-checkout-session", func(c *fiber.Ctx) error {
-		// Parse the request body
-		type CheckoutRequest struct {
-			ProductId   string `json:"productId"`
-			Name        string `json:"name"`
-			Price       int    `json:"price"` // in cents
-			Success_url string `json:"success_url"`
-			Cancel_url  string `json:"cancel_url"`
-		}
+		// Get form values directly - no need to parse body first in Fiber
+		productId := c.FormValue("productId", "")
+		name := c.FormValue("name", "")
+		priceStr := c.FormValue("price", "")
+		successUrl := c.FormValue("success_url", "")
+		cancelUrl := c.FormValue("cancel_url", "")
 
-		var req CheckoutRequest
-		if err := c.BodyParser(&req); err != nil {
+		// Validate required fields
+		if productId == "" || name == "" || priceStr == "" || successUrl == "" || cancelUrl == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid request body",
+				"error": "Missing required fields",
 			})
 		}
 
-		// Validate required fields
-		if req.ProductId == "" || req.Name == "" || req.Price <= 0 || req.Success_url == "" || req.Cancel_url == "" {
+		// Parse price
+		price, err := strconv.Atoi(priceStr)
+		if err != nil || price <= 0 {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Missing required fields",
+				"error": "Invalid price",
 			})
 		}
 
@@ -307,41 +307,22 @@ func main() {
 		// Set up the HTTP client
 		client := &http.Client{}
 
-		// Create the request data for Stripe API
-		data := map[string]any{
-			"payment_method_types": []string{"card"},
-			"line_items": []map[string]any{
-				{
-					"price_data": map[string]any{
-						"currency": "usd",
-						"product_data": map[string]any{
-							"name":        fmt.Sprintf("%s@1sat.name", req.Name),
-							"description": "1sat Name Registration",
-						},
-						"unit_amount": req.Price, // already in cents
-					},
-					"quantity": 1,
-				},
-			},
-			"metadata": map[string]string{
-				"name":       req.Name,
-				"product_id": req.ProductId,
-			},
-			"mode":        "payment",
-			"success_url": req.Success_url,
-			"cancel_url":  req.Cancel_url,
-		}
-
-		// Convert the data to JSON
-		jsonData, err := json.Marshal(data)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to create checkout data",
-			})
-		}
+		// Create form data for the Stripe API request
+		formData := url.Values{}
+		formData.Add("payment_method_types[]", "card")
+		formData.Add("line_items[0][price_data][currency]", "usd")
+		formData.Add("line_items[0][price_data][product_data][name]", fmt.Sprintf("%s@1sat.name", name))
+		formData.Add("line_items[0][price_data][product_data][description]", "1sat Name Registration")
+		formData.Add("line_items[0][price_data][unit_amount]", strconv.Itoa(price))
+		formData.Add("line_items[0][quantity]", "1")
+		formData.Add("metadata[name]", name)
+		formData.Add("metadata[product_id]", productId)
+		formData.Add("mode", "payment")
+		formData.Add("success_url", successUrl)
+		formData.Add("cancel_url", cancelUrl)
 
 		// Create the request
-		req1, err := http.NewRequest("POST", "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(string(jsonData)))
+		req, err := http.NewRequest("POST", "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(formData.Encode()))
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to create request",
@@ -349,11 +330,11 @@ func main() {
 		}
 
 		// Set headers
-		req1.Header.Set("Content-Type", "application/json")
-		req1.Header.Set("Authorization", "Bearer "+stripeKey)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer "+stripeKey)
 
 		// Send the request
-		resp, err := client.Do(req1)
+		resp, err := client.Do(req)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to contact Stripe API",
@@ -390,21 +371,12 @@ func main() {
 
 	// Name registration endpoint
 	app.Post("/register", func(c *fiber.Ctx) error {
-		// Parse the request body
-		type RegisterRequest struct {
-			Handle  string `json:"handle"`
-			Address string `json:"address"` // BSV address
-		}
-
-		var req RegisterRequest
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid request body",
-			})
-		}
+		// Get form values directly
+		handle := c.FormValue("handle", "")
+		address := c.FormValue("address", "")
 
 		// Validate required fields
-		if req.Handle == "" {
+		if handle == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Missing handle",
 			})
@@ -412,7 +384,7 @@ func main() {
 
 		// Check if the name is already registered (taken)
 		question := &opns.Question{
-			Event: "mine:" + req.Handle,
+			Event: "mine:" + handle,
 		}
 
 		b, err := json.Marshal(question)
@@ -435,20 +407,20 @@ func main() {
 		}
 
 		// For debugging only - in production this would actually mint the name
-		log.Printf("Registering name: %s for address: %s", req.Handle, req.Address)
+		log.Printf("Registering name: %s for address: %s", handle, address)
 
 		// TODO: Call actual mining logic here
 
 		// For now, we'll simulate success
 
 		// Create a mock transaction ID for testing
-		mockTxid := fmt.Sprintf("%064x", req.Handle)
+		mockTxid := fmt.Sprintf("%064x", handle)
 
 		// Return success response
 		return c.JSON(fiber.Map{
 			"success":       true,
 			"transactionId": mockTxid,
-			"name":          req.Handle + "@1sat.name",
+			"name":          handle + "@1sat.name",
 			"message":       "Name registration initiated",
 		})
 	})
