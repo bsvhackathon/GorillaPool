@@ -1,36 +1,16 @@
-import { useState, useEffect, KeyboardEvent } from 'react';
+import { useState, useEffect, type KeyboardEvent } from 'react';
 
-// Available themes
+// Available themes - keeping only dark themes and emerald
 const themes = [
-  'light',
   'dark',
-  'cupcake',
-  'bumblebee',
   'emerald',
   'corporate',
   'synthwave',
   'retro',
   'cyberpunk',
-  'valentine',
-  'halloween',
-  'garden',
-  'forest',
-  'aqua',
-  'lofi',
-  'pastel',
-  'fantasy',
-  'wireframe',
-  'black',
-  'luxury',
   'dracula',
-  'cmyk',
-  'autumn',
-  'business',
-  'acid',
-  'lemonade',
   'night',
   'coffee',
-  'winter',
   'dim',
   'nord',
   'sunset',
@@ -38,11 +18,11 @@ const themes = [
 
 export const ThemeSelector = () => {
   const [theme, setTheme] = useState<string>(() => {
-    // Initialize theme from localStorage or default to 'light'
+    // Initialize theme from localStorage or default to 'dark'
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('theme') || 'light';
+      return localStorage.getItem('theme') || 'dark';
     }
-    return 'light';
+    return 'dark';
   });
 
   // Update theme in localStorage and document when it changes
@@ -51,7 +31,7 @@ export const ThemeSelector = () => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, themeValue: string) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLButtonElement>, themeValue: string) => {
     if (e.key === 'Enter' || e.key === ' ') {
       setTheme(themeValue);
     }
@@ -71,7 +51,9 @@ export const ThemeSelector = () => {
           fill="none"
           viewBox="0 0 24 24"
           className="inline-block h-5 w-5 stroke-current md:h-6 md:w-6"
+          aria-hidden="true"
         >
+          <title>Theme icon</title>
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -86,7 +68,9 @@ export const ThemeSelector = () => {
           className="ml-1 hidden h-3 w-3 fill-current opacity-60 sm:inline-block"
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 2048 2048"
+          aria-hidden="true"
         >
+          <title>Dropdown arrow</title>
           <path d="M1799 349l242 241-1017 1017L7 590l242-241 775 775 775-775z" />
         </svg>
       </button>
@@ -95,15 +79,14 @@ export const ThemeSelector = () => {
       >
         <div className="grid grid-cols-1 gap-3 p-3">
           {themes.map((t) => (
-            <div
+            <button
               key={t}
-              className={`overflow-hidden rounded-lg outline outline-2 outline-offset-2 outline-base-content ${
+              type="button"
+              className={`overflow-hidden rounded-lg outline outline-2 outline-offset-2 outline-base-content text-left ${
                 theme === t ? 'outline-offset-4' : 'opacity-50 outline-offset-2'
               }`}
               onClick={() => setTheme(t)}
               onKeyDown={(e) => handleKeyDown(e, t)}
-              role="button"
-              tabIndex={0}
               aria-label={`Theme ${t}`}
             >
               <div
@@ -122,7 +105,7 @@ export const ThemeSelector = () => {
                   </div>
                 </div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>

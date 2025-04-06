@@ -21,24 +21,25 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   const [nameStatus, setNameStatus] = useState<NameStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [addresses, setAddresses] = useState<{bsvAddress?: string; ordAddress?: string}>({});
+  const [addresses, setAddresses] = useState<{ bsvAddress?: string; ordAddress?: string }>({});
   const [checkFailed, setCheckFailed] = useState(false);
   const [lastCheckedName, setLastCheckedName] = useState('');
-  
+  const [transaction, setTransaction] = useState<string | null>(null);
+
   // Get wallet from context
   const { isConnected, isProcessing, connectWallet, purchaseOrdinal } = useWallet();
   const wallet = useYoursWallet();
-  
+
   // Check for return from Stripe Checkout
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
-    
+
     if (query.get("success")) {
       const purchasedName = localStorage.getItem("pendingNameRegistration");
       if (purchasedName) {
         // Registration was successful
         const formattedName = `${purchasedName}@1sat.name`;
-        
+
         // Register the name and notify parent component
         registerNameWithApi(purchasedName)
           .then(() => onBuy(formattedName))
@@ -62,25 +63,25 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [onBuy]);
-  
+
   // When the name input changes, check if it's available
   useEffect(() => {
     // Clear any existing error
     if (error) {
       setError(null);
     }
-    
+
     // Clear check failed state when name input changes
     if (nameInput !== lastCheckedName) {
       setCheckFailed(false);
     }
-    
+
     // Wait for debounce
     const delay = setTimeout(() => {
       // Only check if name length is sufficient and we haven't already failed checking this exact name
       if (nameInput && nameInput.length >= 3 && !checkFailed) {
         setLastCheckedName(nameInput);
-        
+
         checkNameAvailability(nameInput).catch(err => {
           // On network error, mark this check as failed to prevent retries
           setIsCheckingName(false);
@@ -92,7 +93,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         setNameStatus(null);
       }
     }, 500);
-    
+
     return () => clearTimeout(delay);
   }, [nameInput, error, checkFailed, lastCheckedName]);
 
@@ -102,21 +103,21 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       getAddresses();
     }
   }, [isConnected, wallet]);
-  
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim().toLowerCase();
     // Only allow letters and numbers
     const sanitized = value.replace(/[^a-z0-9]/g, '');
-    
+
     // If the name is changing, reset error states
     if (sanitized !== nameInput) {
       setError(null);
       setCheckFailed(false);
     }
-    
+
     setNameInput(sanitized);
   };
-  
+
   const handleBuyClick = async () => {
     if (!isConnected) {
       // Connect wallet first
@@ -128,49 +129,49 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       }
       return;
     }
-    
+
     handleBuy();
   };
-  
+
   const checkNameAvailability = async (name: string): Promise<void> => {
     if (!name) return;
-    
+
     setIsCheckingName(true);
     setNameStatus(null);
     setError(null);
-    
+
     try {
       // Check if the name has been registered using the API endpoint
       const response = await fetch(`${apiUrl}/mine/${name}`);
-      
+
       // If we get a 404, it means the name is not found (available)
       if (response.status === 404) {
         setNameStatus({ registered: false });
         setIsCheckingName(false);
         return;
       }
-      
+
       if (!response.ok) {
         throw new Error(`Failed to check name availability: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
-      
+
       // If data.outpoint exists, it means someone already registered this name
       if (data.outpoint) {
         // Name is already registered and we have the outpoint directly
         const outpoint = data.outpoint;
-        
+
         try {
           // Check if it's for sale on the marketplace
           const marketResponse = await fetch(`${marketApiUrl}/inscriptions/${outpoint}`);
-          
+
           if (marketResponse.ok) {
             const marketData = (await marketResponse.json()).data;
-            
+
             // Check if it has a listing (the list object with sale=true indicates it's for sale)
             if (marketData?.list && marketData.list.sale === true) {
-              setNameStatus({ 
+              setNameStatus({
                 registered: true,
                 forSale: true,
                 price: marketData.list.price || 5, // Use the price from the listing
@@ -200,15 +201,15 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       setIsCheckingName(false);
     }
   };
-  
+
   const getAddresses = async () => {
     try {
       if (!wallet?.getAddresses) {
         throw new Error('Wallet does not support getAddresses method');
       }
-      
+
       const walletAddresses = await wallet.getAddresses();
-      
+
       if (walletAddresses?.bsvAddress) {
         setAddresses({
           bsvAddress: walletAddresses.bsvAddress,
@@ -216,7 +217,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         });
         return walletAddresses;
       }
-      
+
       console.error('Ordinal address not available in wallet response');
       setError('Could not retrieve ordinal address from wallet. Please ensure your wallet supports ordinals.');
       return null;
@@ -234,19 +235,20 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           handle,
           // Include wallet information if needed by the API
           address: addresses?.bsvAddress || ''
         })
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
         throw new Error(errorData.error || 'Registration failed');
       }
-      
+
       const data = await response.json();
+      setTransaction(data.transactionId || null);
       return data.success || false;
     } catch (error) {
       console.error('API registration error:', error);
@@ -260,36 +262,36 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       setError('This name is already registered and not for sale.');
       return;
     }
-    
+
     // Handle marketplace purchase directly
     if (nameStatus?.registered && nameStatus.forSale && nameStatus.outpoint) {
       setIsLoading(true);
       setError(null);
-      
+
       try {
         // Create the formatted name with the suffix
         const formattedName = `${nameInput}@1sat.name`;
-        
+
         // Calculate marketplace fee (5%)
         const marketplaceRate = 0.05;
         const marketplaceAddress = "17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62"; // Example fee address
-        
+
         console.log(`Purchasing ${formattedName} from marketplace for $${nameStatus.price}`);
-        
+
         // Purchase parameters
         const purchaseParams = {
           outpoint: nameStatus.outpoint,
-          marketplaceRate, 
+          marketplaceRate,
           marketplaceAddress
         };
-        
+
         // Execute the purchase
         const txid = await purchaseOrdinal(purchaseParams);
         console.log(`Purchase successful, txid: ${txid}`);
-        
+
         // If we got here, transaction was successful
         await onBuy(formattedName);
-        
+
         // Clear the input
         setNameInput('');
         setNameStatus(null);
@@ -303,10 +305,10 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       // For new registrations, redirect to Stripe Checkout
       try {
         setIsLoading(true);
-        
+
         // Save the name being registered in localStorage for retrieval after payment
         localStorage.setItem("pendingNameRegistration", nameInput);
-        
+
         // Create Stripe checkout session
         const response = await fetch(`${apiUrl}/create-checkout-session`, {
           method: 'POST',
@@ -321,14 +323,14 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
             cancel_url: `${window.location.origin}${window.location.pathname}?canceled=true`,
           }),
         });
-        
+
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
           throw new Error(errorData.error || 'Failed to create checkout session');
         }
-        
+
         const { url } = await response.json();
-        
+
         // Redirect to Stripe checkout
         window.location.href = url;
       } catch (err) {
@@ -344,19 +346,19 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     if (isLoading || isProcessing) {
       return <span className="loading loading-spinner loading-sm" />;
     }
-    
+
     if (!isConnected) {
       return 'Connect';
     }
-    
+
     if (nameStatus?.registered) {
       if (nameStatus.forSale) {
         return `Buy ($${nameStatus.price})`;
       }
       return 'Unavailable';
     }
-    
-    return 'Register ($1)';
+
+    return `Register $${priceUsd}`;
   };
 
   // Determine button disabled state
@@ -372,7 +374,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     if (nameInput) {
       setCheckFailed(false);
       setError(null);
-      
+
       // Trigger an immediate check
       checkNameAvailability(nameInput).catch(err => {
         setIsCheckingName(false);
@@ -386,16 +388,17 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     <>
       <div className="card bg-base-200 shadow-xl mb-8 max-w-2xl mx-auto">
         <div className="card-body">
-          <div className="flex items-center flex-wrap gap-x-3 mb-2">
+          <div className="flex items-center flex-wrap gap-x-3">
             <h2 className="card-title m-0">
-              <span className="merriweather-bold text-3xl text-primary">
-                {nameInput ? 'Register' : 'Choose your 1sat name'}
-              </span> 
+              <span className="merriweather-bold text-3xl text-secondary">
+                {nameInput ? 'Register ' : 'Choose your '}
+                {nameInput ? '' : <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">1sat name</span>}
+              </span>
             </h2>
-            
+
             <div className="relative min-h-8 overflow-hidden flex-1">
               {nameInput ? (
-                <div className={`font-mono text-2xl transition-all duration-300 whitespace-nowrap overflow-x-auto ${isFocused ? 'text-primary' : 'text-base-content'}`} style={{ 
+                <div className={`font-mono text-2xl transition-all duration-300 whitespace-nowrap overflow-x-auto ${isFocused ? 'text-primary' : 'text-base-content'}`} style={{
                   transformOrigin: 'left center',
                   transform: isFocused ? 'scale(1.03)' : 'scale(1)'
                 }}>
@@ -409,11 +412,11 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
               )}
             </div>
           </div>
-          
-          <p className="text-lg mb-4 text-base-content">1sat names available for ${priceUsd} each</p>
-          
+
+          <p className="text-lg mb-4 text-base-content">names available for ${priceUsd} each</p>
+
           <div className="form-control w-full">
-            <label htmlFor="nameInput" className="label">
+            <label htmlFor="nameInput" className="label mb-1">
               <span className="label-text">Enter your name (letters and numbers only)</span>
               {isCheckingName && (
                 <span className="label-text-alt">
@@ -431,17 +434,16 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
                 <span className="label-text-alt text-success">Available!</span>
               )}
             </label>
-            
+
             <div className="join w-full">
-              <label className={`input input-bordered join-item flex-grow ${
-                nameStatus?.registered && !nameStatus.forSale ? 'input-error' : 
-                nameStatus?.registered && nameStatus.forSale ? 'input-warning' : 
-                nameStatus && !nameStatus.registered ? 'input-success' : ''
-              } ${isFocused ? 'ring ring-primary ring-opacity-50' : ''}`}>
-                <input 
+              <label className={`input input-bordered join-item flex-grow ${nameStatus?.registered && !nameStatus.forSale ? 'input-error' :
+                  nameStatus?.registered && nameStatus.forSale ? 'input-warning' :
+                    nameStatus && !nameStatus.registered ? 'input-success' : ''
+                } ${isFocused ? 'ring ring-primary ring-opacity-50' : ''}`}>
+                <input
                   id="nameInput"
-                  type="text" 
-                  placeholder="enter name here" 
+                  type="text"
+                  placeholder="enter name here"
                   className="grow"
                   value={nameInput}
                   onChange={handleInputChange}
@@ -451,7 +453,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
                 />
                 <span className="opacity-70">@1sat.name</span>
               </label>
-              <button 
+              <button
                 type="button"
                 className="btn btn-primary join-item"
                 onClick={handleBuyClick}
@@ -460,14 +462,14 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
                 {getButtonText()}
               </button>
             </div>
-            
+
             {error && (
               <div className="label flex justify-between items-center">
                 <span className="label-text-alt text-error">{error}</span>
                 {checkFailed && (
-                  <button 
-                    type="button" 
-                    className="btn btn-xs btn-outline" 
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
                     onClick={handleRetryCheck}
                   >
                     Retry
@@ -476,8 +478,23 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
               </div>
             )}
           </div>
+
+          {/* Purchase confirmation and success messaging */}
+          {transaction && !error && (
+            <div className="alert alert-success mt-4">
+              <span>
+                Registration successful! Transaction ID: <span className="font-mono text-xs">{transaction}</span>
+              </span>
+            </div>
+          )}
+
+
         </div>
+
+
       </div>
+
+
     </>
   );
 };
