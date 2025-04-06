@@ -72,7 +72,9 @@ func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpo
 		events = append(events, "mine:"+o.Domain)
 	} else if insc := inscription.Decode(outputScript); insc != nil && insc.File.Type == "application/op-ns" {
 		events = append(events, "opns:"+string(insc.File.Content))
-		if p := p2pkh.Decode(script.NewFromBytes(insc.ScriptSuffix), true); p != nil {
+		if p := p2pkh.Decode(script.NewFromBytes(insc.ScriptPrefix), true); p != nil {
+			events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
+		} else if p := p2pkh.Decode(script.NewFromBytes(insc.ScriptSuffix), true); p != nil {
 			events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
 		}
 	} else if p := p2pkh.Decode(outputScript, true); p != nil {
