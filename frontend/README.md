@@ -53,42 +53,6 @@ export default tseslint.config({
 })
 ```
 
-## Stripe Integration
-
-The application uses Stripe Checkout for processing payments when registering new names. The Stripe integration requires the following backend API endpoint:
-
-### Required Backend Endpoint
-
-1. `POST /create-checkout-session`
-
-   This endpoint should create a Stripe Checkout session and return a URL that the user will be redirected to.
-
-   **Request Body:**
-   ```json
-   {
-     "productId": "prod_S4paZiF5jYieyS",
-     "name": "username",
-     "price": 100, // in cents
-     "success_url": "https://example.com/success",
-     "cancel_url": "https://example.com/canceled"
-   }
-   ```
-
-   **Response:**
-   ```json
-   {
-     "url": "https://checkout.stripe.com/..."
-   }
-   ```
-
-   **Implementation Details:**
-   - The backend should use the Stripe API to create a checkout session
-   - The `productId` should be used to identify the product in Stripe
-   - The `name` should be stored with the checkout session as metadata
-   - After successful payment, the backend should handle the webhook from Stripe to complete the name registration
-   - The success_url will include a query parameter `?success=true`
-   - The cancel_url will include a query parameter `?canceled=true`
-
 ### Payment Flow
 
 1. User enters a name to register and clicks "Register"
