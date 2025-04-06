@@ -276,7 +276,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     }
   };
 
-  const handleDirectWalletPayment = async (price: number) => {
+  const handleDirectWalletPayment = async (satoshis: number) => {
     try {
       setIsLoading(true);
       setError('');
@@ -286,13 +286,10 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         setIsLoading(false);
         return;
       }
-
-      // The price is in USD, need to convert it to BSV and then to satoshis
-      // This calculation assumes 1 USD = 1 BSV for simplicity (exchange rate logic could be added)
-      // 1 BSV = 100,000,000 satoshis
-      const satoshis = Math.floor(price * 100000000); // Convert USD to satoshis
       
-      console.log(`Sending ${satoshis} satoshis to ${marketAddress}`);
+      // Log using BSV for display only
+      const bsvAmount = satoshis / 100000000;
+      console.log(`Sending ${satoshis} satoshis (${bsvAmount} BSV) to ${marketAddress}`);
       
       // Send payment directly to market address using the wallet
       const walletResponse = await wallet.sendBsv([
@@ -408,9 +405,55 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     } else {
       // Name is available for registration
       if (preferredPayment === 'wallet') {
-        handleDirectWalletPayment(nameStatus.price || 5);
+        // Get exchange rate - fail if we can't get a valid rate
+        try {
+          let exchangeRate: number | null = null;
+          
+          if (wallet.getExchangeRate) {
+            const walletRate = await wallet.getExchangeRate();
+            if (walletRate && typeof walletRate === 'number' && !Number.isNaN(walletRate) && walletRate > 0) {
+              exchangeRate = walletRate;
+              console.log('Using wallet exchange rate:', exchangeRate);
+            }
+          }
+          
+          // Try to get from localStorage as fallback (like MarketPage does)
+          if (exchangeRate === null) {
+            const cachedRate = localStorage.getItem('bsvExchangeRate');
+            if (cachedRate) {
+              try {
+                const rateData = JSON.parse(cachedRate);
+                // Only use cached rate if it's less than 1 hour old and it's a valid number
+                if (rateData.timestamp && Date.now() - rateData.timestamp < 60 * 60 * 1000 &&
+                    typeof rateData.rate === 'number' && !Number.isNaN(rateData.rate) && rateData.rate > 0) {
+                  exchangeRate = rateData.rate;
+                  console.log('Using cached exchange rate:', exchangeRate);
+                }
+              } catch (e) {
+                console.warn('Error parsing cached exchange rate:', e);
+              }
+            }
+          }
+          
+          // Fail if we couldn't get a valid exchange rate
+          if (exchangeRate === null) {
+            throw new Error('Could not obtain a valid exchange rate. Please try again later.');
+          }
+          
+          // Calculate satoshis from USD price
+          // $1 USD / (USD per BSV) = Fraction of BSV needed
+          // Then multiply by 100M to get satoshis
+          const satoshis = Math.floor((priceUsd / exchangeRate) * 100000000);
+          console.log(`Converting $${priceUsd} to satoshis using rate $${exchangeRate}/BSV: ${satoshis} satoshis`);
+          
+          handleDirectWalletPayment(satoshis);
+        } catch (err) {
+          console.error('Error calculating price:', err);
+          setError(`Failed to calculate price in BSV: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
       } else {
-        handleStripePayment(nameStatus.price || 5);
+        // For Stripe, price is in USD cents
+        handleStripePayment(priceUsd);
       }
     }
   };
