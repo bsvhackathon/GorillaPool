@@ -140,7 +140,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     setError(null);
     
     try {
-      // Check if the name has been mined using the new endpoint
+      // Check if the name has been registered using the API endpoint
       const response = await fetch(`${apiUrl}/mine/${name}`);
       
       if (!response.ok) {
@@ -149,29 +149,24 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       
       const data = await response.json();
       
-      // If mined is false, it means someone already mined/registered this name
-      if (!data.outpoint) {
-        // Name is registered, check if it's for sale on the marketplace
+      // If data.outpoint exists, it means someone already registered this name
+      if (data.outpoint) {
+        // Name is already registered and we have the outpoint directly
+        const outpoint = data.outpoint;
+        
         try {
-          // Use the outpoint from the response to check the marketplace
-          const outpoint = data.outpoint;
-          if (!outpoint) {
-            setNameStatus({ registered: true, forSale: false });
-            return;
-          }
-          
-          // Fetch the ordinal from marketplace API
+          // Check if it's for sale on the marketplace
           const marketResponse = await fetch(`${marketApiUrl}/inscriptions/${outpoint}`);
           
           if (marketResponse.ok) {
-            const marketData = await marketResponse.json();
+            const marketData = (await marketResponse.json()).data;
             
             // Check if it has a listing (the list object with sale=true indicates it's for sale)
-            if (marketData.data?.list && marketData.data.list.sale === true) {
+            if (marketData?.list && marketData.list.sale === true) {
               setNameStatus({ 
                 registered: true,
                 forSale: true,
-                price: marketData.data.list.price || 5, // Use the price from the listing
+                price: marketData.list.price || 5, // Use the price from the listing
                 outpoint // Store the outpoint for the purchase function
               });
             } else {
@@ -188,7 +183,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
           setNameStatus({ registered: true, forSale: false });
         }
       } else {
-        // Name is available (not mined)
+        // Name is available (not registered yet)
         setNameStatus({ registered: false });
       }
     } catch (err) {

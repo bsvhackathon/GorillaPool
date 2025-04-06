@@ -40,7 +40,7 @@ interface Ordinal {
     encoding?: string;
     mime?: string;
   };
-  [key: string]: any; // For any additional properties returned by the wallet
+  [key: string]: unknown; // For any additional properties returned by the wallet
 }
 
 // Define types for the paginated ordinals response
@@ -365,22 +365,29 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
         if (!response) {
           return { ordinals: [] };
         }
+        
         // Ensure we're returning a consistent format
+        if (Array.isArray(response)) {
+          return { ordinals: response as unknown as Ordinal[] };
+        }
+        
         return {
-          ordinals: response.ordinals || [],
+          ordinals: (response.ordinals || []) as unknown as Ordinal[],
           from: response.from
         };
       }
       
       // Otherwise get all ordinals (could be slow if user has many)
       const ordinals = await wallet.getOrdinals();
+      
       // Handle both array response and paginated response
       if (Array.isArray(ordinals)) {
-        return { ordinals };
+        return { ordinals: ordinals as unknown as Ordinal[] };
       }
+      
       return {
-        ordinals: ordinals.ordinals || [],
-        from: ordinals.from
+        ordinals: (ordinals?.ordinals || []) as unknown as Ordinal[],
+        from: ordinals?.from
       };
     } catch (error) {
       console.error('Error fetching ordinals:', error);
