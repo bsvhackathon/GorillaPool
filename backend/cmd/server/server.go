@@ -229,6 +229,32 @@ func main() {
 		}
 	})
 
+	app.Get("/mine/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+		if name == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing name",
+			})
+		}
+
+		answer, err := e.Lookup(c.Context(), &lookup.LookupQuestion{
+			Event: "mine:" + name,
+		})
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		isMined := false
+		if answer == nil {
+			isMined = true
+		}
+		return c.JSON(fiber.Map{
+			"mined": isMined,
+		})
+	})
+
 	app.Post("/arc-ingest", func(c *fiber.Ctx) error {
 		var status broadcaster.ArcResponse
 		if err := c.BodyParser(&status); err != nil {

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
-import { marketApiUrl } from '../constants';
 
 interface MarketListing {
   name: string;

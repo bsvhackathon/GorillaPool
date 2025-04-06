@@ -362,6 +362,9 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
       // If params are provided, use pagination
       if (params) {
         const response = await wallet.getOrdinals(params);
+        if (!response) {
+          return { ordinals: [] };
+        }
         // Ensure we're returning a consistent format
         return {
           ordinals: response.ordinals || [],
