@@ -41,8 +41,8 @@ require (
 	google.golang.org/protobuf v1.30.0 // indirect
 )
 
-replace github.com/4chain-ag/go-overlay-services => ../../go-overlay-services
+replace github.com/4chain-ag/go-overlay-services => github.com/4chain-ag/go-overlay-services v0.1.1-0.20250406004613-587630db21d8
 
-replace github.com/bsv-blockchain/go-sdk => ../../go-sdk
+replace github.com/bsv-blockchain/go-sdk => github.com/b-open-io/go-sdk v1.1.22-0.20250406003733-6a6b9ac5b847
 
-replace github.com/bitcoin-sv/go-templates => ../../go-templates
+replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20250406004142-94f1148a83bb
