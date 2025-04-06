@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 
 interface MarketListing {
@@ -17,49 +17,49 @@ const MarketPage = () => {
   const { isConnected, connectWallet, isProcessing, purchaseOrdinal } = useWallet();
   
   // Fetch market listings
-  useEffect(() => {
-    const fetchListings = async () => {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        // In a real implementation, fetch from the market API
-        // const response = await fetch(`${marketApiUrl}/listings`);
-        // const data = await response.json();
-        
-        // For demo, use mock data
-        const mockListings: MarketListing[] = [
-          {
-            name: 'cool@1sat.name',
-            price: 25,
-            outpoint: '9b5c4e89fb2d813c69b6f9991b769ecdddaf8e78c9f69e40be1009e79ac10b30_0',
-            seller: '17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62'
-          },
-          {
-            name: 'developer@1sat.name',
-            price: 50,
-            outpoint: '6e2f5a9b0d12c8a743ce9fe8d1e479bfa9b851d76e0f4e9a6bc2a5f31c6a2d83_0',
-            seller: '17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62'
-          },
-          {
-            name: 'bitcoin@1sat.name',
-            price: 100,
-            outpoint: '3f2a8c1b5e97d0fa6b4e9c8d7f321a54eb09c7d6a52f1c8b4e7d3a6f90b12c5e_0',
-            seller: '17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62'
-          }
-        ];
-        
-        setListings(mockListings);
-      } catch (err) {
-        console.error('Error fetching market listings:', err);
-        setError(`Failed to load market listings: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const fetchListings = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
     
-    fetchListings();
+    try {
+      // In a real implementation, fetch from the market API
+      // const response = await fetch(`${marketApiUrl}/listings`);
+      // const data = await response.json();
+      
+      // For demo, use mock data
+      const mockListings: MarketListing[] = [
+        {
+          name: 'cool@1sat.name',
+          price: 25,
+          outpoint: '9b5c4e89fb2d813c69b6f9991b769ecdddaf8e78c9f69e40be1009e79ac10b30_0',
+          seller: '17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62'
+        },
+        {
+          name: 'developer@1sat.name',
+          price: 50,
+          outpoint: '6e2f5a9b0d12c8a743ce9fe8d1e479bfa9b851d76e0f4e9a6bc2a5f31c6a2d83_0',
+          seller: '17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62'
+        },
+        {
+          name: 'bitcoin@1sat.name',
+          price: 100,
+          outpoint: '3f2a8c1b5e97d0fa6b4e9c8d7f321a54eb09c7d6a52f1c8b4e7d3a6f90b12c5e_0',
+          seller: '17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62'
+        }
+      ];
+      
+      setListings(mockListings);
+    } catch (err) {
+      console.error('Error fetching market listings:', err);
+      setError(`Failed to load market listings: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+  
+  useEffect(() => {
+    fetchListings();
+  }, [fetchListings]);
   
   // Buy a name from the marketplace
   const handleBuy = async (listing: MarketListing) => {
@@ -93,6 +93,11 @@ const MarketPage = () => {
       // Remove purchased listing from the display
       setListings(prev => prev.filter(item => item.outpoint !== listing.outpoint));
       
+      // Refresh the listings after a delay
+      setTimeout(() => {
+        fetchListings();
+      }, 5000);
+      
       // Clear success message after 5 seconds
       setTimeout(() => {
         setPurchaseSuccess(null);
@@ -105,7 +110,32 @@ const MarketPage = () => {
   
   return (
     <div>
-      <h1 className="text-3xl font-bold mb-6 text-primary">Name Marketplace</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-primary">Name Marketplace</h1>
+        <button 
+          className="btn btn-outline btn-sm"
+          onClick={fetchListings}
+          disabled={isLoading}
+          type="button"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-5 w-5 mr-1" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeWidth="2" 
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+            />
+          </svg>
+          Refresh
+        </button>
+      </div>
       
       {purchaseSuccess && (
         <div className="alert alert-success mb-6 shadow-lg">

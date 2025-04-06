@@ -2,7 +2,6 @@ import { useState, type FC, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
 import { priceUsd, apiUrl, marketApiUrl, stripeProductId } from '../constants';
-import { LookupQuestion } from '@bsv/sdk';
 
 interface NameRegistrationProps {
   onBuy: (name: string) => Promise<void>;
@@ -22,6 +21,8 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [addresses, setAddresses] = useState<{bsvAddress?: string; ordAddress?: string}>({});
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [lastCheckedName, setLastCheckedName] = useState('');
   
   // Get wallet from context
   const { isConnected, isProcessing, connectWallet } = useWallet();
@@ -68,22 +69,35 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       setError(null);
     }
     
+    // Clear check failed state when name input changes
+    if (nameInput !== lastCheckedName) {
+      setCheckFailed(false);
+    }
+    
     // Wait for debounce
     const delay = setTimeout(() => {
-      if (nameInput && nameInput.length >= 3) {
-        checkNameAvailability(nameInput);
-      } else if (nameInput) {
+      // Only check if name length is sufficient and we haven't already failed checking this exact name
+      if (nameInput && nameInput.length >= 3 && !checkFailed) {
+        setLastCheckedName(nameInput);
+        
+        checkNameAvailability(nameInput).catch(err => {
+          // On network error, mark this check as failed to prevent retries
+          setIsCheckingName(false);
+          setCheckFailed(true);
+          setError(`Name check failed: ${err instanceof Error ? err.message : 'Network error'}`);
+        });
+      } else if (nameInput && nameInput.length < 3) {
         // Name is too short, don't bother checking availability
         setNameStatus(null);
       }
     }, 500);
     
     return () => clearTimeout(delay);
-  }, [nameInput, error]);
+  }, [nameInput, error, checkFailed, lastCheckedName]);
 
   // Update wallet addresses when connected
   useEffect(() => {
-    if (isConnected && wallet?.getAddresses) {
+    if (isConnected && wallet && typeof wallet.getAddresses === 'function') {
       getAddresses();
     }
   }, [isConnected, wallet]);
@@ -92,6 +106,13 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     const value = e.target.value.trim().toLowerCase();
     // Only allow letters and numbers
     const sanitized = value.replace(/[^a-z0-9]/g, '');
+    
+    // If the name is changing, reset error states
+    if (sanitized !== nameInput) {
+      setError(null);
+      setCheckFailed(false);
+    }
+    
     setNameInput(sanitized);
   };
   
@@ -118,45 +139,41 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     setError(null);
     
     try {
-      // Check if the name is registered
-      const response = await fetch(`${apiUrl}/lookup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          service: 'ls_OpNS',
-          query: {
-            event: `mine:${name}`,
-          }
-        } as LookupQuestion)
-      });
+      // Check if the name has been mined using the new endpoint
+      const response = await fetch(`${apiUrl}/mine/${name}`);
       
       if (!response.ok) {
-        if (response.status === 404) {
-          // Name not found, it's available
-          setNameStatus({ registered: false });
-          return;
-        }
         throw new Error(`Failed to check name availability: ${response.statusText}`);
       }
       
-      // Data is received but not used directly, just indicates the name exists
-      await response.json();
+      const data = await response.json();
       
-      // Check if it's for sale on the marketplace
-      const marketResponse = await fetch(`${marketApiUrl}/name/${name}`);
-      
-      if (marketResponse.ok) {
-        const marketData = await marketResponse.json();
-        setNameStatus({ 
-          registered: true,
-          forSale: true,
-          price: marketData.price || 5 // Default to $5 if price not specified
-        });
+      // If mined is false, it means someone already mined/registered this name
+      if (!data.outpoint) {
+        // Name is registered, check if it's for sale on the marketplace
+        try {
+        // api/inscriptions/{outpoint}
+          const marketResponse = await fetch(`${marketApiUrl}/inscriptions/${data.outpoint}`);
+          
+          if (marketResponse.ok) {
+            const marketData = await marketResponse.json();
+            setNameStatus({ 
+              registered: true,
+              forSale: true,
+              price: marketData.price || 5 // Default to $5 if price not specified
+            });
+          } else {
+            // Name is registered but not for sale
+            setNameStatus({ registered: true, forSale: false });
+          }
+        } catch (marketErr) {
+          console.error('Error checking marketplace:', marketErr);
+          // If market check fails, assume registered but not for sale
+          setNameStatus({ registered: true, forSale: false });
+        }
       } else {
-        // Name is registered but not for sale
-        setNameStatus({ registered: true, forSale: false });
+        // Name is available (not mined)
+        setNameStatus({ registered: false });
       }
     } catch (err) {
       console.error('Error checking name:', err);
@@ -174,7 +191,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       
       const walletAddresses = await wallet.getAddresses();
       
-      if (walletAddresses && walletAddresses.bsvAddress) {
+      if (walletAddresses?.bsvAddress) {
         setAddresses({
           bsvAddress: walletAddresses.bsvAddress,
           ordAddress: walletAddresses.ordAddress
@@ -322,6 +339,21 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     return false;
   };
 
+  // Add a retry button for when checks fail
+  const handleRetryCheck = () => {
+    if (nameInput) {
+      setCheckFailed(false);
+      setError(null);
+      
+      // Trigger an immediate check
+      checkNameAvailability(nameInput).catch(err => {
+        setIsCheckingName(false);
+        setCheckFailed(true);
+        setError(`Name check failed: ${err instanceof Error ? err.message : 'Network error'}`);
+      });
+    }
+  };
+
   return (
     <>
       <div className="card bg-base-200 shadow-xl mb-8 max-w-2xl mx-auto">
@@ -402,8 +434,17 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
             </div>
             
             {error && (
-              <div className="label">
+              <div className="label flex justify-between items-center">
                 <span className="label-text-alt text-error">{error}</span>
+                {checkFailed && (
+                  <button 
+                    type="button" 
+                    className="btn btn-xs btn-outline" 
+                    onClick={handleRetryCheck}
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -187,17 +187,22 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
         ) : (
           <div className="space-y-4 mt-4">
             {ownedNames.map((item) => (
-              <div key={item.outpoint} className="p-4 bg-base-300 rounded-lg flex justify-between items-center">
-                <div className="font-mono text-base-content">
-                  {item.name}
+              <div key={item.outpoint} className="p-4 bg-base-300 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <div className="font-mono text-base-content">
+                    {item.name}
+                    <div className="tooltip" data-tip={`Outpoint: ${item.outpoint}`}>
+                      <span className="text-xs opacity-50 cursor-help ml-2">ⓘ</span>
+                    </div>
+                  </div>
+                  <button 
+                    className="btn btn-sm btn-outline btn-primary"
+                    onClick={() => handleSell(item.outpoint, item.name)}
+                    type="button"
+                  >
+                    Sell
+                  </button>
                 </div>
-                <button 
-                  className="btn btn-sm btn-outline btn-primary"
-                  onClick={() => handleSell(item.outpoint, item.name)}
-                  type="button"
-                >
-                  Sell
-                </button>
               </div>
             ))}
             
