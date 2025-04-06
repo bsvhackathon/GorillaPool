@@ -5,6 +5,7 @@ import './index.css'
 import { WalletProvider } from './context/WalletContext'
 import { YoursProvider } from 'yours-wallet-provider'
 import { StripeProvider } from './context/StripeContext'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // Initialize theme from localStorage or default to user preference or 'light'
 const initializeTheme = () => {
@@ -21,6 +22,16 @@ const initializeTheme = () => {
 // Apply theme on app initialization
 initializeTheme();
 
+// Create a react-query client
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 1000 * 60 * 5, // 5 minutes
+    },
+  },
+});
+
 // Get root element
 const rootElement = document.getElementById('root');
 
@@ -30,12 +41,14 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <YoursProvider>
-      <WalletProvider>
-        <StripeProvider>
-          <App />
-        </StripeProvider>
-      </WalletProvider>
-    </YoursProvider>
+    <QueryClientProvider client={queryClient}>
+      <YoursProvider>
+        <WalletProvider>
+          <StripeProvider>
+            <App />
+          </StripeProvider>
+        </WalletProvider>
+      </YoursProvider>
+    </QueryClientProvider>
   </React.StrictMode>,
 )

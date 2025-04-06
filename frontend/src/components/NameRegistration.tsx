@@ -1,7 +1,7 @@
-import { useState, type FC, useEffect } from 'react';
+import { useState, type FC, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl, stripeProductId } from '../constants';
+import { priceUsd, apiUrl, marketApiUrl, marketFeeRate, marketAddress } from '../constants';
 
 interface NameRegistrationProps {
   onBuy: (name: string) => Promise<void>;
@@ -29,6 +29,46 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   // Get wallet from context
   const { isConnected, isProcessing, connectWallet, purchaseOrdinal } = useWallet();
   const wallet = useYoursWallet();
+
+
+
+  const registerNameWithApi = useCallback(async (name: string): Promise<boolean> => {
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      // Create form data for the request
+      const formData = new URLSearchParams();
+      formData.append('handle', name);
+      
+      // Include wallet information if needed by the API
+      if (addresses?.bsvAddress) {
+        formData.append('address', addresses.bsvAddress);
+      }
+      
+      const response = await fetch(`${apiUrl}/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString()
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Registration failed');
+      }
+
+      const data = await response.json();
+      setTransaction(data.transactionId || null);
+      setIsLoading(false);
+      return data.success || false;
+    } catch (error) {
+      console.error('API registration error:', error);
+      setIsLoading(false);
+      throw error;
+    }
+  }, [addresses?.bsvAddress]);
 
   // Check for return from Stripe Checkout
   useEffect(() => {
@@ -62,7 +102,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       localStorage.removeItem("pendingNameRegistration");
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [onBuy]);
+  }, [onBuy, registerNameWithApi]);
 
   // When the name input changes, check if it's available
   useEffect(() => {
@@ -97,12 +137,38 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     return () => clearTimeout(delay);
   }, [nameInput, error, checkFailed, lastCheckedName]);
 
+  const getAddresses = useCallback(async () => {
+    try {
+      if (!wallet?.getAddresses) {
+        throw new Error('Wallet does not support getAddresses method');
+      }
+
+      const walletAddresses = await wallet.getAddresses();
+
+      if (walletAddresses?.bsvAddress) {
+        setAddresses({
+          bsvAddress: walletAddresses.bsvAddress,
+          ordAddress: walletAddresses.ordAddress
+        });
+        return walletAddresses;
+      }
+
+      console.error('Ordinal address not available in wallet response');
+      setError('Could not retrieve ordinal address from wallet. Please ensure your wallet supports ordinals.');
+      return null;
+    } catch (err) {
+      console.error('Error getting addresses:', err);
+      setError(`Failed to get wallet addresses: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      return null;
+    }
+  }, [wallet]);
+
   // Update wallet addresses when connected
   useEffect(() => {
     if (isConnected && wallet && typeof wallet.getAddresses === 'function') {
       getAddresses();
     }
-  }, [isConnected, wallet]);
+  }, [isConnected, wallet, getAddresses]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.trim().toLowerCase();
@@ -202,57 +268,53 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     }
   };
 
-  const getAddresses = async () => {
+
+
+  const createStripeCheckout = async (name: string, priceInCents: number): Promise<void> => {
     try {
-      if (!wallet?.getAddresses) {
-        throw new Error('Wallet does not support getAddresses method');
+      // Get wallet address if available
+      let address = '';
+      if (addresses?.bsvAddress) {
+        address = addresses.bsvAddress;
       }
-
-      const walletAddresses = await wallet.getAddresses();
-
-      if (walletAddresses?.bsvAddress) {
-        setAddresses({
-          bsvAddress: walletAddresses.bsvAddress,
-          ordAddress: walletAddresses.ordAddress
-        });
-        return walletAddresses;
+      
+      // Create form data for the request
+      const formData = new URLSearchParams();
+      formData.append('productId', 'name-registration');
+      formData.append('name', name);
+      formData.append('price', priceInCents.toString());
+      formData.append('success_url', `${window.location.origin}?success=true`);
+      formData.append('cancel_url', `${window.location.origin}?canceled=true`);
+      
+      // Include wallet address if available
+      if (address) {
+        formData.append('address', address);
       }
-
-      console.error('Ordinal address not available in wallet response');
-      setError('Could not retrieve ordinal address from wallet. Please ensure your wallet supports ordinals.');
-      return null;
-    } catch (err) {
-      console.error('Error getting addresses:', err);
-      setError(`Failed to get wallet addresses: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      return null;
-    }
-  };
-
-  const registerNameWithApi = async (handle: string): Promise<boolean> => {
-    try {
-      const response = await fetch(`${apiUrl}/register`, {
+      
+      const response = await fetch(`${apiUrl}/create-checkout-session`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({
-          handle,
-          // Include wallet information if needed by the API
-          address: addresses?.bsvAddress || ''
-        }).toString()
+        body: formData.toString(),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || 'Registration failed');
+        throw new Error(errorData.error || 'Failed to create checkout session');
       }
 
-      const data = await response.json();
-      setTransaction(data.transactionId || null);
-      return data.success || false;
-    } catch (error) {
-      console.error('API registration error:', error);
-      throw error;
+      const { url } = await response.json();
+      
+      // Save the name being registered in localStorage
+      localStorage.setItem("pendingNameRegistration", name);
+
+      // Redirect to Stripe checkout
+      window.location.href = url;
+    } catch (err) {
+      console.error('Error creating checkout session:', err);
+      setError(`Failed to create checkout session: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setIsLoading(false);
     }
   };
 
@@ -273,8 +335,8 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         const formattedName = `${nameInput}@1sat.name`;
 
         // Calculate marketplace fee (5%)
-        const marketplaceRate = 0.05;
-        const marketplaceAddress = "17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62"; // Example fee address
+        const marketplaceRate = marketFeeRate
+        const marketplaceAddress = marketAddress
 
         console.log(`Purchasing ${formattedName} from marketplace for $${nameStatus.price}`);
 
@@ -310,29 +372,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         localStorage.setItem("pendingNameRegistration", nameInput);
 
         // Create Stripe checkout session
-        const response = await fetch(`${apiUrl}/create-checkout-session`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            productId: stripeProductId,
-            name: nameInput,
-            price: (priceUsd * 100).toString(), // Convert to cents and to string
-            success_url: `${window.location.origin}${window.location.pathname}?success=true`,
-            cancel_url: `${window.location.origin}${window.location.pathname}?canceled=true`,
-          }).toString(),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-          throw new Error(errorData.error || 'Failed to create checkout session');
-        }
-
-        const { url } = await response.json();
-
-        // Redirect to Stripe checkout
-        window.location.href = url;
+        await createStripeCheckout(nameInput, priceUsd * 100);
       } catch (err) {
         console.error('Error creating checkout session:', err);
         setError(`Failed to create checkout session: ${err instanceof Error ? err.message : 'Unknown error'}`);
