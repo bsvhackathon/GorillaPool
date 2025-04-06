@@ -1,7 +1,6 @@
 package opnspaymail
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -28,25 +27,27 @@ type Opns struct {
 	Map      map[string]interface{} `json:"map,omitempty"`
 }
 
+type OwnerResult struct {
+	Outpoint string `json:"outpoint"`
+	Address  string `json:"address"`
+}
+
 // GetPaymailByAlias is a demo implementation of this interface
 func (d *OpnsServiceProvider) GetAddressStringByAlias(_ context.Context, alias, domain string) (string, error) {
 
 	address := ""
 
-	if resp, err := http.Post(
-		os.Getenv("HOSTING_URL")+"/lookup",
-		"application/json",
-		bytes.NewReader([]byte(`{"event":"ev:","alias":"`+alias+`","domain":"`+domain+`"}`)),
-	); err != nil {
+	if resp, err := http.Get(os.Getenv("HOSTING_URL") + "/owner/" + alias); err != nil {
 		return address, err
 	} else {
-		var opns *Opns
+
+		var result *OwnerResult
 		defer resp.Body.Close()
-		if err := json.NewDecoder(resp.Body).Decode(&opns); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return address, err
 		}
 
-		address = opns.Owner
+		address = result.Address
 	}
 	return address, nil
 }
