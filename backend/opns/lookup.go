@@ -78,7 +78,7 @@ func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpo
 	} else if p := p2pkh.Decode(outputScript, true); p != nil {
 		events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
 	}
-
+	l.SaveEvents(ctx, outpoint, events, blockHeight, blockIdx)
 	return nil
 }
 

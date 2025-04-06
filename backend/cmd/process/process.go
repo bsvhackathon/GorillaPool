@@ -123,6 +123,8 @@ func main() {
 		log.Fatalf("Failed to query Redis: %v", err)
 	}
 
+	txids = append([]string{"58b7558ea379f24266c7e2f5fe321992ad9a724fd7a87423ba412677179ccb25"}, txids...)
+
 	for _, txidStr := range txids {
 		select {
 		case <-ctx.Done():

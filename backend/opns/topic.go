@@ -30,10 +30,9 @@ func (tm *TopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes
 	for vin := range previousCoins {
 		sourceOutput := tx.Inputs[vin].SourceTxOutput()
 		ancillaryTxids[tx.Inputs[vin].SourceTXID.String()] = struct{}{}
-		if o := Decode(sourceOutput.LockingScript); o != nil {
+		if o := Decode(sourceOutput.LockingScript); o != nil || tx.Inputs[vin].SourceTXID.Equal(GENESIS.Txid) {
 			admit.CoinsToRetain = previousCoins
 			admit.OutputsToAdmit = []uint32{0, 1, 2}
-
 			return
 		} else if sourceOutput.Satoshis == 1 {
 			satsIn := uint64(0)

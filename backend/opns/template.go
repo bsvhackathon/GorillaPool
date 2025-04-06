@@ -18,7 +18,7 @@ import (
 
 const DIFFICULTY = 22
 
-var GENESIS, _ = overlay.NewOutpointFromString("25cb9c17772641ba2374a8d74f729aad921932fef5e2c76642f279a38e55b758_0")
+var GENESIS, _ = overlay.NewOutpointFromString("58b7558ea379f24266c7e2f5fe321992ad9a724fd7a87423ba412677179ccb25_0")
 
 var comp = big.NewInt(0)
 
