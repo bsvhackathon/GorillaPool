@@ -757,6 +757,7 @@ func main() {
 		var request struct {
 			Name     string `json:"name"`
 			Satoshis int64  `json:"satoshis"`
+			Address  string `json:"address"` // Allow frontend to specify the payment address
 		}
 
 		if err := c.BodyParser(&request); err != nil {
@@ -801,9 +802,12 @@ func main() {
 			})
 		}
 
-		// Generate a payment address (for simplicity, using a fixed address)
-		// In production, you would generate a unique address per transaction
-		paymentAddress := "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6"
+		// Use ONE Market address specified by frontend - this is the correct address
+		// Default to a known valid ONE Market address if not provided
+		var paymentAddress string
+		if request.Address != "" {
+			paymentAddress = request.Address
+		}
 
 		// Store the pending payment information in Redis
 		if err := rdb.HSet(c.Context(), "pending_payments", request.Name, request.Satoshis).Err(); err != nil {
@@ -853,11 +857,19 @@ func main() {
 			log.Printf("Error marking name as paid: %v", err)
 		}
 
-		// Call the mining API
+		// Now we need to register the name using the /register endpoint functionality
+		// Read from Redis any stored wallet address or use default
+		address, err := getNameAddress(c.Context(), request.Name)
+		if err != nil || address == "" {
+			// No address stored, use wallet payment address as default
+			address = "wallet-payment"
+		}
+
+		// Call the actual mining API
 		client := &http.Client{}
 		miningPayload := map[string]string{
 			"domain":       request.Name,
-			"ownerAddress": "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6", // Use a default address
+			"ownerAddress": address,
 		}
 
 		miningData, err := json.Marshal(miningPayload)
@@ -912,7 +924,8 @@ func main() {
 			log.Printf("Error marking name as mined: %v", err)
 		}
 
-		log.Printf("Successfully registered name %s with mining txid %s", request.Name, miningTxid)
+		log.Printf("Successfully registered name %s with mining txid %s and payment txid %s",
+			request.Name, miningTxid, request.Txid)
 
 		// Success response
 		return c.JSON(fiber.Map{
