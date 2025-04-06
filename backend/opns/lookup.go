@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
@@ -44,19 +45,21 @@ type Question struct {
 type LookupService struct {
 	db      *redis.Client
 	storage engine.Storage
+	topic   string
 }
 
-func eventKey(event string) string {
+func EventKey(event string) string {
 	return "ev:" + event
 }
 
-func outpointEventsKey(outpoint *overlay.Outpoint) string {
+func OutpointEventsKey(outpoint *overlay.Outpoint) string {
 	return "oe:" + outpoint.String()
 }
 
-func NewLookupService(connString string, storage engine.Storage) (*LookupService, error) {
+func NewLookupService(connString string, storage engine.Storage, topic string) (*LookupService, error) {
 	r := &LookupService{
 		storage: storage,
+		topic:   topic,
 	}
 	if opts, err := redis.ParseURL(connString); err != nil {
 		return nil, err
@@ -68,6 +71,42 @@ func NewLookupService(connString string, storage engine.Storage) (*LookupService
 
 func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpoint, outputScript *script.Script, topic string, blockHeight uint32, blockIdx uint64) error {
 	events := make([]string, 0, 5)
+	if output, err := l.storage.FindOutput(ctx, outpoint, &l.topic, nil, true); err != nil {
+		return err
+	} else if output == nil {
+		return errors.New("output not found")
+	} else if tx, err := transaction.NewTransactionFromBEEF(output.Beef); err != nil {
+		return err
+	} else {
+		satsOut := uint64(0)
+		for _, output := range tx.Outputs[:outpoint.OutputIndex] {
+			satsOut += output.Satoshis
+		}
+		satsIn := uint64(0)
+		for _, input := range tx.Inputs {
+			sourceOut := input.SourceTxOutput()
+			if satsIn < satsOut {
+				satsIn += sourceOut.Satoshis
+				continue
+			} else if satsIn == satsOut {
+				outpoint := &overlay.Outpoint{
+					Txid:        *input.SourceTXID,
+					OutputIndex: input.SourceTxOutIndex,
+				}
+				if inputEvents, err := l.db.SMembers(ctx, OutpointEventsKey(outpoint)).Result(); err != nil {
+					return err
+				} else {
+					for _, event := range inputEvents {
+						if strings.HasPrefix(event, "opns:") {
+							events = append(events, event)
+							break
+						}
+					}
+					break
+				}
+			}
+		}
+	}
 	if o := Decode(outputScript); o != nil {
 		events = append(events, "mine:"+o.Domain)
 	} else if insc := inscription.Decode(outputScript); insc != nil && insc.File.Type == "application/op-ns" {
@@ -93,12 +132,12 @@ func (l *LookupService) SaveEvent(ctx context.Context, outpoint *overlay.Outpoin
 	}
 	_, err := l.db.Pipelined(ctx, func(p redis.Pipeliner) error {
 		op := outpoint.String()
-		if err := p.ZAdd(ctx, eventKey(event), redis.Z{
+		if err := p.ZAdd(ctx, EventKey(event), redis.Z{
 			Score:  score,
 			Member: op,
 		}).Err(); err != nil {
 			return err
-		} else if err := p.SAdd(ctx, outpointEventsKey(outpoint), event).Err(); err != nil {
+		} else if err := p.SAdd(ctx, OutpointEventsKey(outpoint), event).Err(); err != nil {
 			return err
 		}
 		p.Publish(ctx, event, fmt.Sprintf("%f:%s", score, op))
@@ -117,12 +156,12 @@ func (l *LookupService) SaveEvents(ctx context.Context, outpoint *overlay.Outpoi
 	op := outpoint.String()
 	_, err := l.db.Pipelined(ctx, func(p redis.Pipeliner) error {
 		for _, event := range events {
-			if err := p.ZAdd(ctx, eventKey(event), redis.Z{
+			if err := p.ZAdd(ctx, EventKey(event), redis.Z{
 				Score:  score,
 				Member: op,
 			}).Err(); err != nil {
 				return err
-			} else if err := p.SAdd(ctx, outpointEventsKey(outpoint), event).Err(); err != nil {
+			} else if err := p.SAdd(ctx, OutpointEventsKey(outpoint), event).Err(); err != nil {
 				return err
 			}
 			p.Publish(ctx, event, op)
@@ -131,6 +170,7 @@ func (l *LookupService) SaveEvents(ctx context.Context, outpoint *overlay.Outpoi
 	})
 	return err
 }
+
 func (l *LookupService) Close() {
 	if l.db != nil {
 		l.db.Close()
@@ -152,7 +192,7 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 		}
 		keys := make([]string, len(question.Events))
 		for _, event := range question.Events {
-			keys = append(keys, eventKey(event))
+			keys = append(keys, EventKey(event))
 		}
 		results := make([]redis.Z, 0)
 		switch join {
@@ -201,7 +241,7 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 		}
 	} else if question.Event != "" {
 		query := redis.ZRangeArgs{
-			Key:     eventKey(question.Event),
+			Key:     EventKey(question.Event),
 			Start:   fmt.Sprintf("(%f", startScore),
 			Stop:    "+inf",
 			ByScore: true,
@@ -247,7 +287,7 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 }
 
 func (l *LookupService) OutputSpent(ctx context.Context, outpoint *overlay.Outpoint, _ string) error {
-	return l.db.SAdd(ctx, eventKey("spent"), outpoint.String()).Err()
+	return l.db.SAdd(ctx, EventKey("spent"), outpoint.String()).Err()
 }
 
 func (l *LookupService) OutputsSpent(ctx context.Context, outpoints []*overlay.Outpoint, _ string) error {
@@ -255,23 +295,23 @@ func (l *LookupService) OutputsSpent(ctx context.Context, outpoints []*overlay.O
 	for _, outpoint := range outpoints {
 		args = append(args, outpoint.Bytes())
 	}
-	return l.db.SAdd(ctx, eventKey("spent"), args...).Err()
+	return l.db.SAdd(ctx, EventKey("spent"), args...).Err()
 }
 
 func (l *LookupService) OutputDeleted(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
 	op := outpoint.String()
-	if events, err := l.db.SMembers(ctx, outpointEventsKey(outpoint)).Result(); err != nil {
+	if events, err := l.db.SMembers(ctx, OutpointEventsKey(outpoint)).Result(); err != nil {
 		return err
 	} else if len(events) == 0 {
 		return nil
 	} else {
 		_, err := l.db.Pipelined(ctx, func(p redis.Pipeliner) error {
 			for _, event := range events {
-				if err := p.ZRem(ctx, eventKey(event), op).Err(); err != nil {
+				if err := p.ZRem(ctx, EventKey(event), op).Err(); err != nil {
 					return err
 				}
 			}
-			return p.Del(ctx, outpointEventsKey(outpoint)).Err()
+			return p.Del(ctx, OutpointEventsKey(outpoint)).Err()
 		})
 		return err
 	}
@@ -285,14 +325,14 @@ func (l *LookupService) OutputBlockHeightUpdated(ctx context.Context, outpoint *
 		score = float64(time.Now().UnixNano())
 	}
 	op := outpoint.String()
-	if events, err := l.db.SMembers(ctx, outpointEventsKey(outpoint)).Result(); err != nil {
+	if events, err := l.db.SMembers(ctx, OutpointEventsKey(outpoint)).Result(); err != nil {
 		return err
 	} else if len(events) == 0 {
 		return nil
 	} else {
 		_, err := l.db.Pipelined(ctx, func(p redis.Pipeliner) error {
 			for _, event := range events {
-				if err := p.ZAdd(ctx, eventKey(event), redis.Z{
+				if err := p.ZAdd(ctx, EventKey(event), redis.Z{
 					Score:  score,
 					Member: op,
 				}).Err(); err != nil {

@@ -42,12 +42,16 @@ func (tm *TopicManager) IdentifyAdmissableOutputs(ctx context.Context, beefBytes
 			}
 			satsOut := uint64(0)
 			for vout, output := range tx.Outputs {
-				if satsIn < satsOut {
+				if satsOut < satsIn {
 					satsOut += output.Satoshis
 					continue
-				} else if satsOut == satsIn && output.Satoshis == 1 {
-					admit.CoinsToRetain = previousCoins
-					admit.OutputsToAdmit = append(admit.OutputsToAdmit, uint32(vout))
+				} else if satsOut == satsIn {
+					if output.Satoshis == 0 {
+						continue
+					} else if output.Satoshis == 1 {
+						admit.CoinsToRetain = previousCoins
+						admit.OutputsToAdmit = append(admit.OutputsToAdmit, uint32(vout))
+					}
 				}
 				break
 			}

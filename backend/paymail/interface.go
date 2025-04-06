@@ -11,8 +11,8 @@ import (
 	"github.com/bitcoin-sv/go-paymail"
 	"github.com/bitcoin-sv/go-paymail/server"
 	"github.com/bitcoin-sv/go-paymail/spv"
-
-	"github.com/libsv/go-bt/v2/bscript"
+	"github.com/bsv-blockchain/go-sdk/script"
+	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 )
 
 // Example demo implementation of a service provider
@@ -36,7 +36,7 @@ func (d *OpnsServiceProvider) GetAddressStringByAlias(_ context.Context, alias, 
 	if resp, err := http.Post(
 		os.Getenv("HOSTING_URL")+"/lookup",
 		"application/json",
-		bytes.NewReader([]byte(`{"event":"paymail","alias":"`+alias+`","domain":"`+domain+`"}`)),
+		bytes.NewReader([]byte(`{"event":"ev:","alias":"`+alias+`","domain":"`+domain+`"}`)),
 	); err != nil {
 		return address, err
 	} else {
@@ -74,11 +74,13 @@ func (d *OpnsServiceProvider) CreateAddressResolutionResponse(ctx context.Contex
 	// Generate a new destination / output for the basic address resolution
 	if add, err := d.GetAddressStringByAlias(ctx, alias, domain); err != nil {
 		return nil, err
-	} else if p2pkh, err := bscript.NewP2PKHFromAddress(add); err != nil {
+	} else if address, err := script.NewAddressFromString(add); err != nil {
+		return nil, err
+	} else if lockingScript, err := p2pkh.Lock(address); err != nil {
 		return nil, err
 	} else {
 		response := &paymail.ResolutionPayload{
-			Output: hex.EncodeToString(*p2pkh),
+			Output: hex.EncodeToString(*lockingScript),
 		}
 		// if senderValidation {
 		// 	if response.Signature, err = bitcoin.SignMessage(
@@ -101,11 +103,12 @@ func (d *OpnsServiceProvider) CreateP2PDestinationResponse(ctx context.Context, 
 	}
 	if add, err := d.GetAddressStringByAlias(ctx, alias, domain); err != nil {
 		return nil, err
-	} else if p2pkh, err := bscript.NewP2PKHFromAddress(add); err != nil {
+	} else if address, err := script.NewAddressFromString(add); err != nil {
+		return nil, err
+	} else if lockingScript, err := p2pkh.Lock(address); err != nil {
 		return nil, err
 	} else {
-		output.Script = hex.EncodeToString(*p2pkh)
-		// output.Address = add
+		output.Script = hex.EncodeToString(*lockingScript)
 		// Create the response
 		return &paymail.PaymentDestinationPayload{
 			Outputs:   []*paymail.PaymentOutput{output},

@@ -72,7 +72,11 @@ func main() {
 	lookupService, err := opns.NewLookupService(
 		os.Getenv("REDIS"),
 		storage,
+		"tm_OpNS",
 	)
+	if err != nil {
+		log.Fatalf("Failed to initialize lookup service: %v", err)
+	}
 	tm := "tm_OpNS"
 	e := engine.Engine{
 		Managers: map[string]engine.TopicManager{
