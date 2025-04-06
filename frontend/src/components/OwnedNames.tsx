@@ -20,6 +20,20 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
 
   const { isConnected, getOrdinals } = useWallet();
 
+  // Function to extract the name from an ordinal
+  const extractNameFromOrdinal = useCallback((ordinal: Ordinal): string => {
+    // First try to get the name from insc.file.text which is the inscription text itself
+    const inscriptionText = ordinal.origin?.data?.insc?.file?.text;
+    
+    // If we have valid inscription text, that's our name
+    if (inscriptionText && typeof inscriptionText === 'string' && inscriptionText.trim() !== '') {
+      return inscriptionText.trim();
+    }
+    
+    // Last resort
+    return `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`;
+  }, []);
+
   // Function to load more names (for pagination)
   const loadMoreNames = useCallback(async () => {
     if (!isConnected || !from) return;
@@ -41,8 +55,8 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
         );
       }).map((ordinal: Ordinal) => {
         // Extract the name from the ordinal
-        const domain = ordinal.origin?.data?.insc?.file?.text || '';
-        const name = domain ? `${domain}@1sat.name` : '';
+        const domainName = extractNameFromOrdinal(ordinal);
+        const name = domainName ? `${domainName}@1sat.name` : '';
 
         return {
           name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
@@ -62,7 +76,7 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [isConnected, getOrdinals, from]);
+  }, [isConnected, getOrdinals, from, extractNameFromOrdinal]);
 
   // Load names when connected
   useEffect(() => {
@@ -86,7 +100,6 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
         // Extract names from ordinals (filtering for 1sat.name ordinals)
         const nameOrdinals = response.ordinals.filter((ordinal: Ordinal) => {
           // Filter for 1sat.name ordinals based on opns data or file type
-          // Using type assertion for ordinal.origin.data since the Yours wallet provider types don't match exactly
           const originData = ordinal.origin?.data;
           return (
             originData?.insc?.file?.text !== undefined ||
@@ -94,10 +107,10 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
           );
         }).map((ordinal: Ordinal) => {
           // Extract the name from the ordinal
-          const domain = ordinal.origin?.data?.insc?.file?.text || '';
-          const name = domain ? `${domain}@1sat.name` : '';
+          const domainName = extractNameFromOrdinal(ordinal);
+          const name = domainName ? `${domainName}@1sat.name` : '';
 
-          console.log({name, domain, ordinal});
+          console.log({name, domainName, ordinal});
 
           return {
             name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
@@ -120,7 +133,7 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
     };
 
     fetchNames();
-  }, [isConnected, getOrdinals]);
+  }, [isConnected, getOrdinals, extractNameFromOrdinal]);
 
   // Handle selling a name
   const handleSell = async (outpoint: string, name: string) => {
