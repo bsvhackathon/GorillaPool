@@ -34,6 +34,13 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
     return `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`;
   }, []);
 
+  // Function to check if an ordinal is a 1sat.name
+  const is1SatName = useCallback((ordinal: Ordinal): boolean => {
+    // Check if this is a name ordinal by verifying it has the application/op-ns content type
+    const contentType = ordinal.origin?.data?.insc?.file?.type;
+    return typeof contentType === 'string' && contentType.includes('application/op-ns');
+  }, []);
+
   // Function to load more names (for pagination)
   const loadMoreNames = useCallback(async () => {
     if (!isConnected || !from) return;
@@ -46,23 +53,18 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
       const response = await getOrdinals({ from, limit: 20 });
 
       // Extract names from ordinals (filtering for 1sat.name ordinals)
-      const nameOrdinals = response.ordinals.filter((ordinal: Ordinal) => {
-        // Check if this is a 1sat.name ordinal by examining origin data
-        const originData = ordinal.origin?.data;
-        return (
-          originData?.insc?.file?.text !== undefined ||
-          originData?.insc?.file?.type?.includes('application/op-ns')
-        );
-      }).map((ordinal: Ordinal) => {
-        // Extract the name from the ordinal
-        const domainName = extractNameFromOrdinal(ordinal);
-        const name = domainName ? `${domainName}@1sat.name` : '';
+      const nameOrdinals = response.ordinals
+        .filter(is1SatName)
+        .map((ordinal: Ordinal) => {
+          // Extract the name from the ordinal
+          const domainName = extractNameFromOrdinal(ordinal);
+          const name = domainName ? `${domainName}@1sat.name` : '';
 
-        return {
-          name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
-          outpoint: ordinal.outpoint
-        };
-      });
+          return {
+            name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
+            outpoint: ordinal.outpoint
+          };
+        });
 
       // Add to the existing list of owned names
       setOwnedNames(prev => [...prev, ...nameOrdinals]);
@@ -76,7 +78,7 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [isConnected, getOrdinals, from, extractNameFromOrdinal]);
+  }, [isConnected, getOrdinals, from, extractNameFromOrdinal, is1SatName]);
 
   // Load names when connected
   useEffect(() => {
@@ -97,20 +99,19 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
         const response = await getOrdinals({ limit: 20 });
 
         console.log("all ordinals", response.ordinals);
+        
+        // Log the number of ordinals vs. 1sat.names for debugging
+        const totalOrdinals = response.ordinals.length;
+        const names = response.ordinals.filter(is1SatName);
+        console.log(`Found ${names.length} 1sat.names out of ${totalOrdinals} total ordinals`);
+        
         // Extract names from ordinals (filtering for 1sat.name ordinals)
-        const nameOrdinals = response.ordinals.filter((ordinal: Ordinal) => {
-          // Filter for 1sat.name ordinals based on opns data or file type
-          const originData = ordinal.origin?.data;
-          return (
-            originData?.insc?.file?.text !== undefined ||
-            originData?.insc?.file?.type?.includes('application/op-ns')
-          );
-        }).map((ordinal: Ordinal) => {
+        const nameOrdinals = names.map((ordinal: Ordinal) => {
           // Extract the name from the ordinal
           const domainName = extractNameFromOrdinal(ordinal);
           const name = domainName ? `${domainName}@1sat.name` : '';
 
-          console.log({name, domainName, ordinal});
+          console.log({name, domainName, type: ordinal.origin?.data?.insc?.file?.type});
 
           return {
             name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
@@ -133,7 +134,7 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
     };
 
     fetchNames();
-  }, [isConnected, getOrdinals, extractNameFromOrdinal]);
+  }, [isConnected, getOrdinals, extractNameFromOrdinal, is1SatName]);
 
   // Handle selling a name
   const handleSell = async (outpoint: string, name: string) => {
