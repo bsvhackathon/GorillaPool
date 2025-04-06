@@ -8,6 +8,7 @@ import {
   useRef,
 } from 'react';
 import {
+  type Ordinal,
   type SendBsv,
   type SendBsv20Response,
   useYoursWallet,
@@ -24,23 +25,6 @@ interface WalletAddresses {
 interface SocialProfile {
   displayName?: string;
   avatar?: string;
-}
-
-// Define Ordinal interface based on the Yours Wallet API
-interface Ordinal {
-  id: string;
-  outpoint: string;
-  origin: {
-    outpoint: string;
-    data?: string;
-  };
-  typeInfo: {
-    content?: string;
-    contentType?: string;
-    encoding?: string;
-    mime?: string;
-  };
-  [key: string]: unknown; // For any additional properties returned by the wallet
 }
 
 // Define types for the paginated ordinals response
@@ -393,11 +377,11 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
         
         // Ensure we're returning a consistent format
         if (Array.isArray(response)) {
-          return { ordinals: response as unknown as Ordinal[] };
+          return { ordinals: response };
         }
         
         return {
-          ordinals: (response.ordinals || []) as unknown as Ordinal[],
+          ordinals: (response.ordinals || []),
           from: response.from
         };
       }

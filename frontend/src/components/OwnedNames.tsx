@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, type FC } from 'react';
 import { useWallet } from '../context/WalletContext';
+import type { Ordinal } from 'yours-wallet-provider';
 
 interface OwnedNamesProps {
   onSell: (outpoint: string, name: string) => Promise<void>;
@@ -8,12 +9,6 @@ interface OwnedNamesProps {
 interface NameOrdinal {
   name: string;
   outpoint: string;
-}
-
-interface OrdinalData {
-  name?: string;
-  handle?: string;
-  [key: string]: unknown;
 }
 
 const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
@@ -37,34 +32,20 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
       const response = await getOrdinals({ from, limit: 20 });
 
       // Extract names from ordinals (filtering for 1sat.name ordinals)
-      const nameOrdinals = response.ordinals.filter(ordinal => {
-        // Filter for 1sat.name ordinals based on content or metadata
+      const nameOrdinals = response.ordinals.filter((ordinal: Ordinal) => {
+        // Check if this is a 1sat.name ordinal by examining origin data
+        const originData = ordinal.origin?.data;
         return (
-          // Check if this is a 1sat.name ordinal by examining content or metadata
-          ordinal.typeInfo?.content?.includes('@1sat.name') ||
-          typeof ordinal.data === 'string' && ordinal.data.includes('@1sat.name') ||
-          (ordinal.data && typeof ordinal.data === 'object' &&
-            ((ordinal.data as OrdinalData).name?.includes('@1sat.name') ||
-              (ordinal.data as OrdinalData).handle?.includes('@1sat.name')))
+          originData?.insc?.file?.text !== undefined ||
+          originData?.insc?.file?.type?.includes('application/op-ns')
         );
-      }).map(ordinal => {
+      }).map((ordinal: Ordinal) => {
         // Extract the name from the ordinal
-        let name = '';
-        if (ordinal.typeInfo?.content?.includes('@1sat.name')) {
-          name = ordinal.typeInfo.content;
-        } else if (typeof ordinal.data === 'string' && ordinal.data.includes('@1sat.name')) {
-          name = ordinal.data;
-        } else if (ordinal.data && typeof ordinal.data === 'object') {
-          const data = ordinal.data as OrdinalData;
-          if (data.name?.includes('@1sat.name')) {
-            name = data.name;
-          } else if (data.handle?.includes('@1sat.name')) {
-            name = `${data.handle}@1sat.name`;
-          }
-        }
+        const domain = ordinal.origin?.data?.insc?.file?.text || '';
+        const name = domain ? `${domain}@1sat.name` : '';
 
         return {
-          name: name || `Unknown Name (${ordinal.id.slice(0, 8)}...)`,
+          name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
           outpoint: ordinal.outpoint
         };
       });
@@ -101,33 +82,25 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
         // Get ordinals with pagination
         const response = await getOrdinals({ limit: 20 });
 
+        console.log("all ordinals", response.ordinals);
         // Extract names from ordinals (filtering for 1sat.name ordinals)
-        const nameOrdinals = response.ordinals.filter(ordinal => {
-          // Filter for 1sat.name ordinals based on content or metadata
+        const nameOrdinals = response.ordinals.filter((ordinal: Ordinal) => {
+          // Filter for 1sat.name ordinals based on opns data or file type
+          // Using type assertion for ordinal.origin.data since the Yours wallet provider types don't match exactly
+          const originData = ordinal.origin?.data;
           return (
-            // Check if this is a 1sat.name ordinal by examining content or metadata
-            ordinal.typeInfo?.contentType?.includes('application/op-ns')
+            originData?.insc?.file?.text !== undefined ||
+            originData?.insc?.file?.type?.includes('application/op-ns')
           );
-        }).map(ordinal => {
+        }).map((ordinal: Ordinal) => {
           // Extract the name from the ordinal
-          let name = '';
-          if (ordinal.typeInfo?.content?.includes('@1sat.name')) {
-            name = ordinal.typeInfo.content;
-          } else if (typeof ordinal.data === 'string' && ordinal.data.includes('@1sat.name')) {
-            name = ordinal.data;
-          } else if (ordinal.data && typeof ordinal.data === 'object') {
-            const data = ordinal.data as OrdinalData;
-            if (data.name?.includes('@1sat.name')) {
-              name = data.name;
-            } else if (data.handle?.includes('@1sat.name')) {
-              name = `${data.handle}@1sat.name`;
-            }
-          }
+          const domain = ordinal.origin?.data?.insc?.file?.text || '';
+          const name = domain ? `${domain}@1sat.name` : '';
 
-          console.log({nameOrdinals});
+          console.log({name, domain, ordinal});
 
           return {
-            name: name || `Unknown Name (${ordinal.id.slice(0, 8)}...)`,
+            name: name || `Unknown Name (${ordinal.outpoint.slice(0, 8)}...)`,
             outpoint: ordinal.outpoint
           };
         });
