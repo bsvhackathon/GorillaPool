@@ -11,6 +11,7 @@ interface NameStatus {
   registered: boolean;
   forSale?: boolean;
   price?: number;
+  outpoint?: string;
 }
 
 const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
@@ -25,7 +26,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   const [lastCheckedName, setLastCheckedName] = useState('');
   
   // Get wallet from context
-  const { isConnected, isProcessing, connectWallet } = useWallet();
+  const { isConnected, isProcessing, connectWallet, purchaseOrdinal } = useWallet();
   const wallet = useYoursWallet();
   
   // Check for return from Stripe Checkout
@@ -152,18 +153,33 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       if (!data.outpoint) {
         // Name is registered, check if it's for sale on the marketplace
         try {
-        // api/inscriptions/{outpoint}
-          const marketResponse = await fetch(`${marketApiUrl}/inscriptions/${data.outpoint}`);
+          // Use the outpoint from the response to check the marketplace
+          const outpoint = data.outpoint;
+          if (!outpoint) {
+            setNameStatus({ registered: true, forSale: false });
+            return;
+          }
+          
+          // Fetch the ordinal from marketplace API
+          const marketResponse = await fetch(`${marketApiUrl}/inscriptions/${outpoint}`);
           
           if (marketResponse.ok) {
             const marketData = await marketResponse.json();
-            setNameStatus({ 
-              registered: true,
-              forSale: true,
-              price: marketData.price || 5 // Default to $5 if price not specified
-            });
+            
+            // Check if it has a listing (the list object with sale=true indicates it's for sale)
+            if (marketData.data?.list && marketData.data.list.sale === true) {
+              setNameStatus({ 
+                registered: true,
+                forSale: true,
+                price: marketData.data.list.price || 5, // Use the price from the listing
+                outpoint // Store the outpoint for the purchase function
+              });
+            } else {
+              // Name is registered but not listed for sale
+              setNameStatus({ registered: true, forSale: false });
+            }
           } else {
-            // Name is registered but not for sale
+            // Name is registered but not found in marketplace
             setNameStatus({ registered: true, forSale: false });
           }
         } catch (marketErr) {
@@ -244,7 +260,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     }
     
     // Handle marketplace purchase directly
-    if (nameStatus?.registered && nameStatus.forSale) {
+    if (nameStatus?.registered && nameStatus.forSale && nameStatus.outpoint) {
       setIsLoading(true);
       setError(null);
       
@@ -252,12 +268,22 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         // Create the formatted name with the suffix
         const formattedName = `${nameInput}@1sat.name`;
         
-        // Handle marketplace purchase
-        console.log(`Purchasing ${formattedName} from marketplace for $${nameStatus.price}`);
-        // Implement marketplace purchase logic here
+        // Calculate marketplace fee (5%)
+        const marketplaceRate = 0.05;
+        const marketplaceAddress = "17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62"; // Example fee address
         
-        // For now, just simulate success
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log(`Purchasing ${formattedName} from marketplace for $${nameStatus.price}`);
+        
+        // Purchase parameters
+        const purchaseParams = {
+          outpoint: nameStatus.outpoint,
+          marketplaceRate, 
+          marketplaceAddress
+        };
+        
+        // Execute the purchase
+        const txid = await purchaseOrdinal(purchaseParams);
+        console.log(`Purchase successful, txid: ${txid}`);
         
         // If we got here, transaction was successful
         await onBuy(formattedName);
