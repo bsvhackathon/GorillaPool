@@ -97,6 +97,7 @@ func main() {
 	lookupService, err := opns.NewLookupService(
 		os.Getenv("REDIS"),
 		storage,
+		"tm_OpNS",
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize event lookup: %v", err)
@@ -563,12 +564,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	if SYNC {
-		if err := e.StartGASPSync(context.Background()); err != nil {
-			log.Fatalf("Error starting sync: %v", err)
-		}
-	}
-
+	// hack in paymail for now
 	go func() {
 		logger := logging.GetDefaultLogger()
 
@@ -600,14 +596,20 @@ func main() {
 			server.WithTimeout(15*time.Second),
 			// server.WithCapabilities(customCapabilities()),
 		)
-		config.Prefix = "https://" //normally paymail requires https, but for demo purposes we'll use http
 		if err != nil {
 			logger.Fatal().Msg(err.Error())
 		}
+		config.Prefix = "https://" //normally paymail requires https, but for demo purposes we'll use http
 
 		// Create & start the server
 		server.StartServer(server.CreateServer(config), config.Logger)
 	}()
+
+	if SYNC {
+		if err := e.StartGASPSync(context.Background()); err != nil {
+			log.Fatalf("Error starting sync: %v", err)
+		}
+	}
 	// Start the server on the specified port
 	if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
 		log.Fatalf("Error starting server: %v", err)
