@@ -296,6 +296,28 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         return;
       }
       
+      // First, register the direct payment with the backend to create a pending payment
+      // This will set up the expected payment amount in Redis
+      const registerDirectResponse = await fetch(`${apiUrl}/register-direct`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: nameInput,
+          satoshis: satoshis,
+          address: marketAddress,
+        }),
+      });
+
+      if (!registerDirectResponse.ok) {
+        const errorData = await registerDirectResponse.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to initialize payment');
+      }
+
+      const registerDirectData = await registerDirectResponse.json();
+      console.log("Register direct response:", registerDirectData);
+      
       // Log using BSV for display only
       const bsvAmount = satoshis / 100000000;
       console.log(`Sending ${satoshis} satoshis (${bsvAmount} BSV) to ${marketAddress}`);
@@ -367,7 +389,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         },
         body: new URLSearchParams({
           handle: nameInput,
-          address: addresses.bsvAddress || '', // Use the user's wallet address for the registration
+          address: addresses.ordAddress || '', // Use the user's ordinal address for the registration
         }).toString(),
       });
 
