@@ -751,6 +751,178 @@ func main() {
 		return nil
 	})
 
+	// Direct registration with wallet payment endpoint
+	app.Post("/register-direct", func(c *fiber.Ctx) error {
+		var request struct {
+			Name     string `json:"name"`
+			Satoshis int64  `json:"satoshis"`
+		}
+
+		if err := c.BodyParser(&request); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid request format",
+			})
+		}
+
+		if request.Name == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing name parameter",
+			})
+		}
+
+		if request.Satoshis <= 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid payment amount",
+			})
+		}
+
+		// Check if the name is already registered (taken)
+		question := &opns.Question{
+			Event: "mine:" + request.Name,
+		}
+
+		b, err := json.Marshal(question)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid question",
+			})
+		}
+
+		answer, err := e.Lookup(c.Context(), &lookup.LookupQuestion{
+			Service: "ls_OpNS",
+			Query:   json.RawMessage(b),
+		})
+
+		// If we got an answer with outputs, the name is already taken
+		if err == nil && len(answer.Outputs) > 0 {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "Name is already registered",
+			})
+		}
+
+		// Generate a payment address (for simplicity, using a fixed address)
+		// In production, you would generate a unique address per transaction
+		paymentAddress := "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6"
+
+		// Store the pending payment information in Redis
+		if err := rdb.HSet(c.Context(), "pending_payments", request.Name, request.Satoshis).Err(); err != nil {
+			log.Printf("Error storing pending payment: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to process payment request",
+			})
+		}
+
+		// Return payment details to the client
+		return c.JSON(fiber.Map{
+			"address":  paymentAddress,
+			"satoshis": request.Satoshis,
+			"message":  "Send payment to complete registration",
+		})
+	})
+
+	// Payment completion webhook
+	app.Post("/payment-complete", func(c *fiber.Ctx) error {
+		var request struct {
+			Name string `json:"name"`
+			Txid string `json:"txid"`
+		}
+
+		if err := c.BodyParser(&request); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid request format",
+			})
+		}
+
+		if request.Name == "" || request.Txid == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing required parameters",
+			})
+		}
+
+		// Verify the payment matches what was expected
+		expectedSatoshis, err := rdb.HGet(c.Context(), "pending_payments", request.Name).Int64()
+		if err != nil || expectedSatoshis <= 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "No pending payment found for this name",
+			})
+		}
+
+		// Mark the name as paid in Redis
+		if err := markNameAsPaid(c.Context(), request.Name, "wallet-payment"); err != nil {
+			log.Printf("Error marking name as paid: %v", err)
+		}
+
+		// Call the mining API
+		client := &http.Client{}
+		miningPayload := map[string]string{
+			"domain":       request.Name,
+			"ownerAddress": "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6", // Use a default address
+		}
+
+		miningData, err := json.Marshal(miningPayload)
+		if err != nil {
+			log.Printf("Error preparing mining request: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to prepare mining request",
+			})
+		}
+
+		req, err := http.NewRequest("POST", "https://go-opns-mint-production.up.railway.app/mine", bytes.NewBuffer(miningData))
+		if err != nil {
+			log.Printf("Error creating mining request: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create mining request",
+			})
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Error calling mining API: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to call mining API: " + err.Error(),
+			})
+		}
+		defer resp.Body.Close()
+
+		// Handle mining API response
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Mining API returned error status: %s", resp.Status)
+			return c.Status(resp.StatusCode).JSON(fiber.Map{
+				"error": "Mining API returned error status: " + resp.Status,
+			})
+		}
+
+		// The mining API returns a simple string which is the txid
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error reading mining API response: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to read mining API response",
+			})
+		}
+
+		// The response is just the txid as a string (remove any quotes or whitespace)
+		miningTxid := strings.Trim(string(bodyBytes), "\" \t\n\r")
+
+		// Mark name as mined in Redis
+		if err := markNameAsMined(c.Context(), request.Name, miningTxid); err != nil {
+			log.Printf("Error marking name as mined: %v", err)
+		}
+
+		log.Printf("Successfully registered name %s with mining txid %s", request.Name, miningTxid)
+
+		// Success response
+		return c.JSON(fiber.Map{
+			"success":    true,
+			"name":       request.Name + "@1sat.name",
+			"txid":       request.Txid, // Payment transaction ID
+			"miningTxid": miningTxid,   // Mining transaction ID
+			"message":    "Name registration successful",
+		})
+	})
+
 	// Start the Redis PubSub goroutine
 	go func() {
 		pubSub := sub.PSubscribe(ctx, "*")
