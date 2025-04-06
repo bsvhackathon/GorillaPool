@@ -264,9 +264,15 @@ func (l *LookupService) LookupOutputs(ctx context.Context, question *Question) (
 	if len(outpoints) == 0 {
 		return nil, nil
 	}
-	outputs, err = l.storage.FindOutputs(ctx, outpoints, &l.topic, question.Spent, true)
+	results, err := l.storage.FindOutputs(ctx, outpoints, &l.topic, question.Spent, true)
 	if err != nil {
 		return nil, err
+	}
+	outputs = make([]*engine.Output, 0, len(results))
+	for _, output := range results {
+		if output != nil {
+			outputs = append(outputs, output)
+		}
 	}
 
 	return outputs, nil
