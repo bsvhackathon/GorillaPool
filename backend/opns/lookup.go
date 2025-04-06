@@ -12,6 +12,7 @@ import (
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/b-open-io/bsv21-overlay/lookups/events"
 	"github.com/bitcoin-sv/go-templates/template/inscription"
+	"github.com/bitcoin-sv/go-templates/template/ordlock"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
 	"github.com/bsv-blockchain/go-sdk/script"
@@ -71,6 +72,7 @@ func NewLookupService(connString string, storage engine.Storage, topic string) (
 
 func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpoint, outputScript *script.Script, topic string, blockHeight uint32, blockIdx uint64) error {
 	events := make([]string, 0, 5)
+	var domain string
 	if output, err := l.storage.FindOutput(ctx, outpoint, &l.topic, nil, true); err != nil {
 		return err
 	} else if output == nil {
@@ -98,6 +100,7 @@ func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpo
 				} else {
 					for _, event := range inputEvents {
 						if strings.HasPrefix(event, "opns:") {
+							domain = strings.TrimPrefix(event, "opns:")
 							events = append(events, event)
 							break
 						}
@@ -110,14 +113,18 @@ func (l *LookupService) OutputAdded(ctx context.Context, outpoint *overlay.Outpo
 	if o := Decode(outputScript); o != nil {
 		events = append(events, "mine:"+o.Domain)
 	} else if insc := inscription.Decode(outputScript); insc != nil && insc.File.Type == "application/op-ns" {
-		events = append(events, "opns:"+string(insc.File.Content))
+		domain = string(insc.File.Content)
+		events = append(events, "opns:"+domain)
 		if p := p2pkh.Decode(script.NewFromBytes(insc.ScriptPrefix), true); p != nil {
 			events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
 		} else if p := p2pkh.Decode(script.NewFromBytes(insc.ScriptSuffix), true); p != nil {
 			events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
 		}
-	} else if p := p2pkh.Decode(outputScript, true); p != nil {
+	}
+	if p := p2pkh.Decode(outputScript, true); p != nil {
 		events = append(events, fmt.Sprintf("p2pkh:%s", p.AddressString))
+	} else if ol := ordlock.Decode(outputScript); ol != nil && domain != "" {
+		events = append(events, fmt.Sprintf("list:%s", domain))
 	}
 	l.SaveEvents(ctx, outpoint, events, blockHeight, blockIdx)
 	return nil

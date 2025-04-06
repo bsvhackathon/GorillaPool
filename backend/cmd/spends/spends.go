@@ -57,16 +57,16 @@ func main() {
 		cancel()
 	}()
 
-	// Initialize storage
-	storage, err := storage.NewRedisStorage(os.Getenv("REDIS"))
+	// Initialize redisStorage
+	redisStorage, err := storage.NewRedisStorage(os.Getenv("REDIS"))
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	defer storage.Close()
+	defer redisStorage.Close()
 
 	lookupService, err := opns.NewLookupService(
 		os.Getenv("REDIS"),
-		storage,
+		redisStorage,
 		"tm_OpNS",
 	)
 	if err != nil {
@@ -80,13 +80,18 @@ func main() {
 		LookupServices: map[string]engine.LookupService{
 			"ls_OpNS": lookupService,
 		},
-		Storage:      storage,
+		Storage:      redisStorage,
 		ChainTracker: chaintracker,
 		PanicOnError: true,
 	}
 	var analyzeSpend func(ctx context.Context, outpoint string) error
 	analyzeSpend = func(ctx context.Context, outpoint string) error {
 		log.Println("Analyzing spend for outpoint:", outpoint)
+		if spend, err := rdb.HGet(ctx, fmt.Sprintf("ot:%s:%s"+outpoint, tm), "sp").Bool(); err != nil && err != redis.Nil {
+			log.Panicln("Error:", err)
+		} else if spend {
+			return nil
+		}
 		if spend, err := func(outpoint string) (string, error) {
 			resp, err := http.Get(fmt.Sprintf("%s/v1/txo/spend/%s", os.Getenv("JUNGLEBUS"), outpoint))
 			if err != nil {
