@@ -2,7 +2,7 @@ package storage
 
 import "github.com/bsv-blockchain/go-sdk/overlay"
 
-func outputTopicKey(outpoint *overlay.Outpoint, topic string) string {
+func OutputTopicKey(outpoint *overlay.Outpoint, topic string) string {
 	return "ot:" + outpoint.String() + ":" + topic
 }
 
@@ -19,5 +19,3 @@ func outMembershipKey(topic string) string {
 func txMembershipKey(topic string) string {
 	return "tm:" + topic
 }
-
-var topicKey = "topics"

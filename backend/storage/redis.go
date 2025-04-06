@@ -26,7 +26,7 @@ func NewRedisStorage(connString string) (*RedisStorage, error) {
 
 func (s *RedisStorage) InsertOutput(ctx context.Context, utxo *engine.Output) (err error) {
 	_, err = s.DB.Pipelined(ctx, func(p redis.Pipeliner) error {
-		if err := p.HMSet(ctx, outputTopicKey(&utxo.Outpoint, utxo.Topic), outputToTopicMap(utxo)).Err(); err != nil {
+		if err := p.HMSet(ctx, OutputTopicKey(&utxo.Outpoint, utxo.Topic), outputToTopicMap(utxo)).Err(); err != nil {
 			return err
 		} else if err := p.HMSet(ctx, outputKey(&utxo.Outpoint), outputToMap(utxo)).Err(); err != nil {
 			return err
@@ -49,7 +49,7 @@ func (s *RedisStorage) FindOutput(ctx context.Context, outpoint *overlay.Outpoin
 		Outpoint: *outpoint,
 	}
 	if topic != nil {
-		otKey := outputTopicKey(outpoint, *topic)
+		otKey := OutputTopicKey(outpoint, *topic)
 		if spent != nil {
 			if isSpent, err := s.DB.HGet(ctx, otKey, "sp").Bool(); err != nil {
 				return nil, err
@@ -137,7 +137,7 @@ func (s *RedisStorage) FindUTXOsForTopic(ctx context.Context, topic string, sinc
 
 func (s *RedisStorage) DeleteOutput(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
 	_, err := s.DB.Pipelined(ctx, func(p redis.Pipeliner) error {
-		if err := p.Del(ctx, outputTopicKey(outpoint, topic)).Err(); err != nil {
+		if err := p.Del(ctx, OutputTopicKey(outpoint, topic)).Err(); err != nil {
 			return err
 		} else if p.ZRem(ctx, outMembershipKey(topic), outpoint.String()).Err(); err != nil {
 			return err
@@ -165,7 +165,7 @@ func (s *RedisStorage) DeleteOutputs(ctx context.Context, outpoints []*overlay.O
 }
 
 func (s *RedisStorage) MarkUTXOAsSpent(ctx context.Context, outpoint *overlay.Outpoint, topic string) error {
-	return s.DB.HSet(ctx, outputTopicKey(outpoint, topic), "sp", true).Err()
+	return s.DB.HSet(ctx, OutputTopicKey(outpoint, topic), "sp", true).Err()
 }
 
 func (s *RedisStorage) MarkUTXOsAsSpent(ctx context.Context, outpoints []*overlay.Outpoint, topic string) error {
@@ -178,7 +178,7 @@ func (s *RedisStorage) MarkUTXOsAsSpent(ctx context.Context, outpoints []*overla
 }
 
 func (s *RedisStorage) UpdateConsumedBy(ctx context.Context, outpoint *overlay.Outpoint, topic string, consumedBy []*overlay.Outpoint) error {
-	return s.DB.HSet(ctx, outputTopicKey(outpoint, topic), "cb", outpointsToBytes(consumedBy)).Err()
+	return s.DB.HSet(ctx, OutputTopicKey(outpoint, topic), "cb", outpointsToBytes(consumedBy)).Err()
 }
 
 func (s *RedisStorage) UpdateTransactionBEEF(ctx context.Context, txid *chainhash.Hash, beef []byte) error {
@@ -186,7 +186,7 @@ func (s *RedisStorage) UpdateTransactionBEEF(ctx context.Context, txid *chainhas
 }
 
 func (s *RedisStorage) UpdateOutputBlockHeight(ctx context.Context, outpoint *overlay.Outpoint, topic string, blockHeight uint32, blockIndex uint64, ancelliaryBeef []byte) error {
-	return s.DB.HSet(ctx, outputTopicKey(outpoint, topic), "h", blockHeight, "i", blockIndex, "ab", ancelliaryBeef).Err()
+	return s.DB.HSet(ctx, OutputTopicKey(outpoint, topic), "h", blockHeight, "i", blockIndex, "ab", ancelliaryBeef).Err()
 }
 
 func (s *RedisStorage) InsertAppliedTransaction(ctx context.Context, tx *overlay.AppliedTransaction) error {
