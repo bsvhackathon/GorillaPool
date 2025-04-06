@@ -264,8 +264,8 @@ func main() {
 		} else {
 			var address string
 			for _, event := range events {
-				if strings.HasPrefix(event, "opns:"+name) {
-					address = strings.TrimPrefix(event, "opns:")
+				if strings.HasPrefix(event, "p2pkh:") {
+					address = strings.TrimPrefix(event, "p2pkh:")
 				}
 			}
 
