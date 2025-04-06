@@ -781,6 +781,7 @@ func main() {
 		var request struct {
 			Name     string `json:"name"`
 			Satoshis int64  `json:"satoshis"`
+			Address  string `json:"address"` // Required payment address from frontend
 		}
 
 		if err := c.BodyParser(&request); err != nil {
@@ -798,6 +799,12 @@ func main() {
 		if request.Satoshis <= 0 {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Invalid payment amount",
+			})
+		}
+
+		if request.Address == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Payment address is required",
 			})
 		}
 
@@ -825,9 +832,8 @@ func main() {
 			})
 		}
 
-		// Generate a payment address (for simplicity, using a fixed address)
-		// In production, you would generate a unique address per transaction
-		paymentAddress := "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6"
+		// Use the market address provided by the frontend
+		paymentAddress := request.Address
 
 		// Store the pending payment information in Redis
 		if err := rdb.HSet(c.Context(), "pending_payments", request.Name, request.Satoshis).Err(); err != nil {
@@ -848,8 +854,9 @@ func main() {
 	// Payment completion webhook
 	app.Post("/payment-complete", func(c *fiber.Ctx) error {
 		var request struct {
-			Name string `json:"name"`
-			Txid string `json:"txid"`
+			Name    string `json:"name"`
+			Txid    string `json:"txid"`
+			Address string `json:"address"` // Added address field to accept from frontend
 		}
 
 		if err := c.BodyParser(&request); err != nil {
@@ -872,17 +879,39 @@ func main() {
 			})
 		}
 
-		// Mark the name as paid in Redis
-		if err := markNameAsPaid(c.Context(), request.Name, "wallet-payment"); err != nil {
+		// Use the address provided by the frontend if available
+		// This should be their ordinals address from the wallet
+		userAddress := request.Address
+		if userAddress == "" {
+			userAddress = "wallet-payment" // Fallback only if no address provided
+			log.Printf("Warning: No address provided for %s, using placeholder", request.Name)
+		} else {
+			log.Printf("Using user's wallet address for %s: %s", request.Name, userAddress)
+		}
+
+		// Mark the name as paid in Redis with the user's wallet address
+		if err := markNameAsPaid(c.Context(), request.Name, userAddress); err != nil {
 			log.Printf("Error marking name as paid: %v", err)
 		}
 
-		// Call the mining API
+		// Now we need to register the name using the mining API
+		// Get the address we just stored
+		address, err := getNameAddress(c.Context(), request.Name)
+		if err != nil || address == "" {
+			log.Printf("Error getting stored address for %s: %v", request.Name, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to retrieve payment address",
+			})
+		}
+
+		// Call the actual mining API
 		client := &http.Client{}
 		miningPayload := map[string]string{
 			"domain":       request.Name,
-			"ownerAddress": "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6", // Use a default address
+			"ownerAddress": address, // Use the address we stored (user's wallet address)
 		}
+
+		log.Printf("Registering name %s for address %s", request.Name, address)
 
 		miningData, err := json.Marshal(miningPayload)
 		if err != nil {
@@ -936,7 +965,8 @@ func main() {
 			log.Printf("Error marking name as mined: %v", err)
 		}
 
-		log.Printf("Successfully registered name %s with mining txid %s", request.Name, miningTxid)
+		log.Printf("Successfully registered name %s with mining txid %s and payment txid %s",
+			request.Name, miningTxid, request.Txid)
 
 		// Success response
 		return c.JSON(fiber.Map{

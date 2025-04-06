@@ -1,7 +1,7 @@
 import { useState, type FC, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl, marketAddress, marketFeeRate } from '../constants';
+import { priceUsd, apiUrl, marketApiUrl, marketAddress } from '../constants';
 import { useSettings } from '../context/SettingsContext';
 
 interface NameRegistrationProps {
@@ -197,10 +197,15 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
 
             // Check if it has a listing (the list object with sale=true indicates it's for sale)
             if (marketData?.list && marketData.list.sale === true) {
+              // Ensure the price exists in the listing
+              if (!marketData.list.price) {
+                throw new Error('Listing is missing a valid price');
+              }
+              
               setNameStatus({
                 registered: true,
                 forSale: true,
-                price: marketData.list.price || 5, // Use the price from the listing
+                price: marketData.list.price,
                 outpoint // Store the outpoint for the purchase function
               });
             } else {
@@ -276,6 +281,119 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     }
   };
 
+  const handleDirectWalletPayment = async (satoshis: number) => {
+    try {
+      setIsLoading(true);
+
+      // ensure wallet is connected
+      await wallet.connect();
+
+      setError('');
+
+      if (!wallet || !isConnected) {
+        setError('Wallet is not connected');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Log using BSV for display only
+      const bsvAmount = satoshis / 100000000;
+      console.log(`Sending ${satoshis} satoshis (${bsvAmount} BSV) to ${marketAddress}`);
+      
+      // Send payment directly to market address using the wallet
+      const walletResponse = await wallet.sendBsv([
+        {
+          address: marketAddress,
+          satoshis: satoshis,
+        }
+      ]);
+
+      if (!walletResponse || !walletResponse.txid) {
+        setError('Payment failed or was cancelled');
+        setIsLoading(false);
+        return;
+      }
+
+      console.log("Payment successful:", walletResponse);
+      const txid = walletResponse.txid;
+
+      if (!addresses.ordAddress) {
+        setError('No ordinal address available');
+        setIsLoading(false);
+        return;
+      }
+
+      // Mark the payment as complete by notifying the backend
+      // This will register the name as paid in Redis
+      const paymentCompleteResponse = await fetch(`${apiUrl}/payment-complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: nameInput,
+          txid: txid,
+          address: addresses.ordAddress
+        }),
+      });
+
+      if (!paymentCompleteResponse.ok) {
+        const paymentErrorData = await paymentCompleteResponse.json();
+        console.error("Payment notification error:", paymentErrorData);
+        setError(paymentErrorData.error || 'Failed to notify server of payment');
+        setIsLoading(false);
+        return;
+      }
+
+      const paymentData = await paymentCompleteResponse.json();
+      console.log("Payment notification response:", paymentData);
+
+      // If payment-complete endpoint already handled the registration,
+      // we don't need to call register endpoint again
+      if (paymentData.success) {
+        // Success! Update UI
+        setTransaction(txid);
+        const formattedName = `${nameInput}@1sat.name`;
+        onBuy(formattedName);
+        setIsLoading(false);
+        return;
+      }
+
+      // Fallback to register endpoint if payment-complete didn't handle registration
+      const registerResponse = await fetch(`${apiUrl}/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          handle: nameInput,
+          address: addresses.bsvAddress || '', // Use the user's wallet address for the registration
+        }).toString(),
+      });
+
+      if (!registerResponse.ok) {
+        const errorData = await registerResponse.json();
+        console.error("Registration error:", errorData);
+        setError(errorData.error || 'Failed to register name');
+        setIsLoading(false);
+        return;
+      }
+
+      const registerData = await registerResponse.json();
+      console.log("Registration response:", registerData);
+
+      // Success! Update UI
+      setTransaction(txid);
+      const formattedName = `${nameInput}@1sat.name`;
+      onBuy(formattedName);
+      setIsLoading(false);
+    } catch (error) {
+      console.error("Error during wallet payment:", error);
+      setError(`Payment failed: ${error instanceof Error ? error.message : String(error)}`);
+      setIsLoading(false);
+    }
+  };
+
   const handleBuy = async () => {
     if (!isConnected) {
       try {
@@ -303,126 +421,60 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     } else {
       // Name is available for registration
       if (preferredPayment === 'wallet') {
-        handleDirectWalletPayment();
+        // Get exchange rate - fail if we can't get a valid rate
+        try {
+          let exchangeRate: number | null = null;
+          
+          if (wallet.getExchangeRate) {
+            const walletRate = await wallet.getExchangeRate();
+            if (walletRate && typeof walletRate === 'number' && !Number.isNaN(walletRate) && walletRate > 0) {
+              exchangeRate = walletRate;
+              console.log('Using wallet exchange rate:', exchangeRate);
+            }
+          }
+          
+          // Try to get from localStorage as fallback (like MarketPage does)
+          if (exchangeRate === null) {
+            const cachedRate = localStorage.getItem('bsvExchangeRate');
+            if (cachedRate) {
+              try {
+                const rateData = JSON.parse(cachedRate);
+                // Only use cached rate if it's less than 1 hour old and it's a valid number
+                if (rateData.timestamp && Date.now() - rateData.timestamp < 60 * 60 * 1000 &&
+                    typeof rateData.rate === 'number' && !Number.isNaN(rateData.rate) && rateData.rate > 0) {
+                  exchangeRate = rateData.rate;
+                  console.log('Using cached exchange rate:', exchangeRate);
+                }
+              } catch (e) {
+                console.warn('Error parsing cached exchange rate:', e);
+              }
+            }
+          }
+          
+          // Fail if we couldn't get a valid exchange rate
+          if (exchangeRate === null) {
+            throw new Error('Could not obtain a valid exchange rate. Please try again later.');
+          }
+          
+          // Calculate satoshis from USD price
+          // $1 USD / (USD per BSV) = Fraction of BSV needed
+          // Then multiply by 100M to get satoshis
+          const satoshis = Math.floor((priceUsd / exchangeRate) * 100000000);
+          console.log(`Converting $${priceUsd} to satoshis using rate $${exchangeRate}/BSV: ${satoshis} satoshis`);
+          
+          handleDirectWalletPayment(satoshis);
+        } catch (err) {
+          console.error('Error calculating price:', err);
+          setError(`Failed to calculate price in BSV: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
       } else {
-        handleStripePayment();
+        // For Stripe, price is in USD cents
+        handleStripePayment(priceUsd);
       }
     }
   };
 
   // Pay directly with Yours wallet
-  const handleDirectWalletPayment = async () => {
-    if (!nameInput) return;
-    
-    setIsLoading(true);
-    setError('');
-    
-    // Set a timeout to handle when users close the payment window without making a decision
-    const paymentTimeout = setTimeout(() => {
-      if (isLoading) {
-        setIsLoading(false);
-        setError('Payment request timed out or was canceled. Please try again.');
-      }
-    }, 120000); // 2 minute timeout
-    
-    try {
-      if (!wallet || !isConnected) {
-        throw new Error('Wallet is not connected');
-      }
-      
-      // Calculate price in satoshis (1 BSV = 100,000,000 satoshis)
-      const exchangeRate = wallet.getExchangeRate ? await wallet.getExchangeRate() : 100;
-      const satoshis = Math.round(priceUsd * 100000000 / (exchangeRate || 100));
-      
-      if (!satoshis || Number.isNaN(satoshis) || satoshis <= 0) {
-        throw new Error('Invalid price calculation');
-      }
-      
-      // Create payload for direct registration
-      const payload = {
-        name: nameInput,
-        satoshis: satoshis
-      };
-      
-      // Send payment directly to server for processing
-      const response = await fetch(`${apiUrl}/register-direct`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(data.error || 'Registration failed');
-      }
-      
-      const data = await response.json();
-      
-      // If we get an address to pay, do the wallet payment
-      if (data.address && data.satoshis) {
-        try {
-          const marketFee = Math.round(data.satoshis * marketFeeRate);
-          const paymentResponse = await wallet.sendBsv([{
-            address: data.address,
-            satoshis: data.satoshis,
-          }, {
-            address: marketAddress,
-            satoshis: marketFee,
-          }]);
-          
-          // Handle the response safely
-          const txid = typeof paymentResponse === 'string' ? 
-            paymentResponse : 
-            (paymentResponse && typeof paymentResponse === 'object' && 'txid' in paymentResponse) ? 
-              String(paymentResponse.txid) : null;
-          
-          if (!txid) {
-            throw new Error('Payment failed - no transaction ID returned');
-          }
-          
-          // Clear timeout since we got a response
-          clearTimeout(paymentTimeout);
-          
-          // Notify the server of the successful payment
-          await fetch(`${apiUrl}/payment-complete`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              name: nameInput,
-              txid: txid
-            }),
-          });
-          
-          // Update UI with success
-          setTransaction(txid);
-          const formattedName = `${nameInput}@1sat.name`;
-          onBuy(formattedName);
-        } catch (paymentError) {
-          console.error('Payment error:', paymentError);
-          // Check if the error is a user cancellation
-          const errorMessage = paymentError instanceof Error ? paymentError.message : 'Unknown error';
-          if (errorMessage.includes('cancel') || errorMessage.includes('rejected') || errorMessage.includes('denied')) {
-            throw new Error('Payment was canceled by user');
-          }
-          throw paymentError;
-        }
-      } else {
-        throw new Error('Invalid server response');
-      }
-    } catch (err) {
-      console.error('Error with direct wallet payment:', err);
-      setError(`Payment failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    } finally {
-      clearTimeout(paymentTimeout);
-      setIsLoading(false);
-    }
-  };
-  
-  // Handle purchase from marketplace using purchaseOrdinal
   const handleBuyFromMarketplace = async () => {
     if (!nameStatus?.outpoint) {
       setError('Missing outpoint for purchase');
@@ -453,12 +505,12 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   };
   
   // Handle payment with Stripe
-  const handleStripePayment = async () => {
+  const handleStripePayment = async (price: number) => {
     if (!nameInput) return;
     
     try {
       localStorage.setItem("pendingNameRegistration", nameInput);
-      await createStripeCheckout(nameInput, priceUsd * 100);
+      await createStripeCheckout(nameInput, price * 100);
     } catch (err) {
       console.error('Error creating checkout session:', err);
       setError(`Failed to create checkout session: ${err instanceof Error ? err.message : 'Unknown error'}`);
