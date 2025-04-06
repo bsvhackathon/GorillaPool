@@ -1,7 +1,7 @@
 import { useState, type FC, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl } from '../constants';
+import { priceUsd, apiUrl, marketApiUrl, marketAddress, marketFeeRate } from '../constants';
 import { useSettings } from '../context/SettingsContext';
 
 interface NameRegistrationProps {
@@ -354,12 +354,15 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       
       // If we get an address to pay, do the wallet payment
       if (data.address && data.satoshis) {
-        // @ts-expect-error - Yours wallet API doesn't match TypeScript interface
-        const paymentResponse = await wallet.sendBsv({
+        // Calculate market fee
+        const marketFee = Math.round(data.satoshis * marketFeeRate);
+        const paymentResponse = await wallet.sendBsv([{
           address: data.address,
-          amount: data.satoshis,
-          currency: 'satoshis'
-        });
+          satoshis: data.satoshis,
+        }, {
+          address: marketAddress,
+          satoshis: marketFee,
+        }]);
         
         // Handle the response safely
         const txid = typeof paymentResponse === 'string' ? 
