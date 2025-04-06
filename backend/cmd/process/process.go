@@ -18,7 +18,6 @@ import (
 	"github.com/bsvhackathon/GorillaPool/backend/opns"
 	"github.com/bsvhackathon/GorillaPool/backend/storage"
 	"github.com/joho/godotenv"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/redis/go-redis/v9"
 )
 

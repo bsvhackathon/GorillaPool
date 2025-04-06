@@ -16,6 +16,8 @@ import (
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/4chain-ag/go-overlay-services/pkg/core/gasp/core"
+	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 
 	// storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
@@ -100,7 +102,7 @@ func main() {
 	e := engine.Engine{
 		Managers: map[string]engine.TopicManager{},
 		LookupServices: map[string]engine.LookupService{
-			"ls_opns": lookupService,
+			"ls_OpNS": lookupService,
 		},
 		SyncConfiguration: map[string]engine.SyncConfiguration{},
 		Broadcaster: &broadcaster.Arc{
@@ -133,7 +135,8 @@ func main() {
 	// Create a new Fiber app
 	app := fiber.New()
 	app.Use(logger.New())
-
+	app.Use(compress.New())
+	app.Use(cors.New(cors.Config{AllowOrigins: "*"}))
 	// Define routes
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello, World!")
