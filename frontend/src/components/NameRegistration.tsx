@@ -317,6 +317,14 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     setIsLoading(true);
     setError('');
     
+    // Set a timeout to handle when users close the payment window without making a decision
+    const paymentTimeout = setTimeout(() => {
+      if (isLoading) {
+        setIsLoading(false);
+        setError('Payment request timed out or was canceled. Please try again.');
+      }
+    }, 120000); // 2 minute timeout
+    
     try {
       if (!wallet || !isConnected) {
         throw new Error('Wallet is not connected');
@@ -354,42 +362,54 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       
       // If we get an address to pay, do the wallet payment
       if (data.address && data.satoshis) {
-        // Calculate market fee
-        const marketFee = Math.round(data.satoshis * marketFeeRate);
-        const paymentResponse = await wallet.sendBsv([{
-          address: data.address,
-          satoshis: data.satoshis,
-        }, {
-          address: marketAddress,
-          satoshis: marketFee,
-        }]);
-        
-        // Handle the response safely
-        const txid = typeof paymentResponse === 'string' ? 
-          paymentResponse : 
-          (paymentResponse && typeof paymentResponse === 'object' && 'txid' in paymentResponse) ? 
-            String(paymentResponse.txid) : null;
-        
-        if (!txid) {
-          throw new Error('Payment failed - no transaction ID returned');
+        try {
+          const marketFee = Math.round(data.satoshis * marketFeeRate);
+          const paymentResponse = await wallet.sendBsv([{
+            address: data.address,
+            satoshis: data.satoshis,
+          }, {
+            address: marketAddress,
+            satoshis: marketFee,
+          }]);
+          
+          // Handle the response safely
+          const txid = typeof paymentResponse === 'string' ? 
+            paymentResponse : 
+            (paymentResponse && typeof paymentResponse === 'object' && 'txid' in paymentResponse) ? 
+              String(paymentResponse.txid) : null;
+          
+          if (!txid) {
+            throw new Error('Payment failed - no transaction ID returned');
+          }
+          
+          // Clear timeout since we got a response
+          clearTimeout(paymentTimeout);
+          
+          // Notify the server of the successful payment
+          await fetch(`${apiUrl}/payment-complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: nameInput,
+              txid: txid
+            }),
+          });
+          
+          // Update UI with success
+          setTransaction(txid);
+          const formattedName = `${nameInput}@1sat.name`;
+          onBuy(formattedName);
+        } catch (paymentError) {
+          console.error('Payment error:', paymentError);
+          // Check if the error is a user cancellation
+          const errorMessage = paymentError instanceof Error ? paymentError.message : 'Unknown error';
+          if (errorMessage.includes('cancel') || errorMessage.includes('rejected') || errorMessage.includes('denied')) {
+            throw new Error('Payment was canceled by user');
+          }
+          throw paymentError;
         }
-        
-        // Notify the server of the successful payment
-        await fetch(`${apiUrl}/payment-complete`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: nameInput,
-            txid: txid
-          }),
-        });
-        
-        // Update UI with success
-        setTransaction(txid);
-        const formattedName = `${nameInput}@1sat.name`;
-        onBuy(formattedName);
       } else {
         throw new Error('Invalid server response');
       }
@@ -397,6 +417,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       console.error('Error with direct wallet payment:', err);
       setError(`Payment failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
+      clearTimeout(paymentTimeout);
       setIsLoading(false);
     }
   };
