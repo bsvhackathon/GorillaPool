@@ -1,28 +1,28 @@
 import { useEffect, useRef } from 'react';
 import type { FC } from 'react';
 
-// Page types for navigation
+// Define the page type for the active tab
 export type PageType = 'home' | 'market' | 'domains' | 'settings';
 
 interface NavbarProps {
   isConnected: boolean;
   walletAddress?: string;
-  onConnectWallet: () => void;
-  onDisconnectWallet?: () => void;
   avatar?: string;
-  refreshProfile?: () => Promise<void>;
-  onNavigate?: (page: PageType) => void;
-  currentPage?: PageType;
+  refreshProfile: () => Promise<void>;
+  onConnectWallet: () => Promise<void>;
+  onDisconnectWallet: () => void;
+  onNavigate: (page: PageType) => void;
+  currentPage: PageType;
   hasValidAddresses?: boolean;
 }
 
 const Navbar: FC<NavbarProps> = ({ 
   isConnected, 
   walletAddress, 
-  onConnectWallet,
-  onDisconnectWallet,
   avatar,
   refreshProfile,
+  onConnectWallet,
+  onDisconnectWallet,
   onNavigate,
   currentPage = 'home',
   hasValidAddresses = false
@@ -168,6 +168,15 @@ const Navbar: FC<NavbarProps> = ({
               onClick={() => handleNavigate('market')}
             >
               Market
+            </button>
+          </li>
+          <li>
+            <button 
+              type="button" 
+              className={currentPage === 'domains' ? 'active' : ''}
+              onClick={() => handleNavigate('domains')}
+            >
+              Domains
             </button>
           </li>
           <li>

@@ -3,6 +3,9 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
 import { stripePublishableKey } from '../constants';
 
+// Debug log for Stripe key (will be removed in production)
+console.log(`Stripe key prefix: ${stripePublishableKey ? `${stripePublishableKey.substring(0, 7)}...` : "empty"}`);
+
 // Initialize Stripe
 const stripePromise = loadStripe(stripePublishableKey);
 

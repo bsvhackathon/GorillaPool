@@ -5,6 +5,8 @@ import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from
 import HomePage from './pages/HomePage'
 import MarketPage from './pages/MarketPage'
 import SettingsPage from './pages/SettingsPage'
+import DomainsPage from './pages/DomainsPage'
+import DomainSetupPage from './pages/DomainSetupPage'
 import { useEffect } from 'react'
 
 // Navigation wrapper to handle Navbar interactions
@@ -36,6 +38,9 @@ const NavWrapper = () => {
       case 'market':
         navigate('/market');
         break;
+      case 'domains':
+        navigate('/domains');
+        break;
       case 'settings':
         navigate('/settings');
         break;
@@ -48,6 +53,8 @@ const NavWrapper = () => {
   
   if (pathname.includes('market')) {
     currentPage = 'market';
+  } else if (pathname.includes('domains')) {
+    currentPage = 'domains';
   } else if (pathname.includes('settings')) {
     currentPage = 'settings';
   }
@@ -71,6 +78,8 @@ const NavWrapper = () => {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/market" element={<MarketPage />} />
+            <Route path="/domains" element={<DomainsPage />} />
+            <Route path="/domain-setup" element={<DomainSetupPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>

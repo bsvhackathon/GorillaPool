@@ -143,6 +143,13 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       // Check if the name has been registered using the API endpoint
       const response = await fetch(`${apiUrl}/mine/${name}`);
       
+      // If we get a 404, it means the name is not found (available)
+      if (response.status === 404) {
+        setNameStatus({ registered: false });
+        setIsCheckingName(false);
+        return;
+      }
+      
       if (!response.ok) {
         throw new Error(`Failed to check name availability: ${response.statusText}`);
       }
