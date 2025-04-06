@@ -236,23 +236,36 @@ func main() {
 				"error": "Missing name",
 			})
 		}
-
-		answer, err := e.Lookup(c.Context(), &lookup.LookupQuestion{
+		question := &opns.Question{
 			Event: "mine:" + name,
-		})
-		if err != nil {
+		}
+		if b, err := json.Marshal(question); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid question",
+			})
+		} else if answer, err := e.Lookup(c.Context(), &lookup.LookupQuestion{
+			Service: "ls_OpNS",
+			Query:   json.RawMessage(b),
+		}); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": err.Error(),
 			})
+		} else if len(answer.Outputs) == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "No answer found",
+			})
+		} else if tx, err := transaction.NewTransactionFromBEEF(answer.Outputs[0].Beef); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid transaction",
+			})
+		} else {
+			return c.JSON(fiber.Map{
+				"outpoint": (&overlay.Outpoint{
+					Txid:        *tx.TxID(),
+					OutputIndex: answer.Outputs[0].OutputIndex,
+				}).String(),
+			})
 		}
-
-		isMined := false
-		if answer == nil {
-			isMined = true
-		}
-		return c.JSON(fiber.Map{
-			"mined": isMined,
-		})
 	})
 
 	app.Post("/arc-ingest", func(c *fiber.Ctx) error {
