@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import { useWallet } from '../context/WalletContext';
-import { marketApiUrl } from '../constants';
+import { marketApiUrl, marketAddress, marketFeeRate } from '../constants';
 
 // Define interfaces for GorillaPool API response structure
 interface GorillaPoolListingItem {
@@ -293,50 +293,72 @@ const MarketPage = () => {
     setError(null);
     
     try {
-      // Default marketplace fee address
-      const marketplaceAddress = "17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62";
+      // Calculate the total price with fee for display purposes
+      const totalPriceBsv = listing.priceBsv;
+      const feeAmount = totalPriceBsv * marketFeeRate;
+      const totalWithFee = totalPriceBsv + feeAmount;
       
-      // Use wallet's purchaseOrdinal method to buy the name
+      // Format prices for display
+      const formattedPrice = totalPriceBsv.toFixed(8);
+      const formattedFee = feeAmount.toFixed(8);
+      const formattedTotal = totalWithFee.toFixed(8);
+      
+      console.log(`Buying ${listing.name} for ${formattedPrice} BSV + ${formattedFee} fee (${formattedTotal} total)`);
+      
+      // Purchase the ordinal with marketplace fee
       const txid = await purchaseOrdinal({
         outpoint: listing.outpoint,
-        // Optional: Set marketplace fee (e.g., 5% = 0.05)
-        marketplaceRate: 0.05,
-        // Optional: Set marketplace address to collect fee
-        marketplaceAddress
+        marketplaceRate: marketFeeRate,
+        marketplaceAddress: marketAddress
       });
       
-      console.log(`Successfully purchased ${listing.name}, txid: ${txid}`);
-      
-      // Show success message with transaction ID
-      setPurchaseSuccess(listing.name);
-      setPurchaseTxid(txid);
-      
-      // Refresh the listings 
-      setTimeout(() => {
-        refetch();
-      }, 2000);
-      
-      // Clear success message after 10 seconds
-      setTimeout(() => {
-        setPurchaseSuccess(null);
-        setPurchaseTxid(null);
-      }, 10000);
+      if (txid) {
+        setPurchaseSuccess(listing.name);
+        setPurchaseTxid(txid);
+        console.log(`Successfully purchased ${listing.name} with txid: ${txid}`);
+      } else {
+        throw new Error('No transaction ID returned');
+      }
     } catch (err) {
       console.error('Error purchasing name:', err);
-      setError(`Failed to purchase ${listing.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setError(`Failed to purchase name: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
   
   // Format price display
   const formatPrice = (listing: MarketListing) => {
+    // If we don't have the exchange rate yet or price is null, show skeleton loaders
+    if (exchangeRate === null || listing.priceUsd === null) {
+      return (
+        <div className="mt-2 mb-3">
+          <div className="skeleton h-6 w-24 mb-1" />
+          <div className="skeleton h-4 w-32" />
+        </div>
+      );
+    }
+    
+    // Calculate fee amounts
+    const feeAmountBsv = listing.priceBsv * marketFeeRate;
+    const totalPriceBsv = listing.priceBsv + feeAmountBsv;
+    
+    // Calculate USD equivalents if exchange rate is available
+    const feeAmountUsd = listing.priceUsd * marketFeeRate;
+    const totalPriceUsd = listing.priceUsd + feeAmountUsd;
+    
     return (
       <div className="mt-2 mb-3">
-        {listing.priceUsd !== null ? (
-          <p className="text-xl font-bold text-primary">${listing.priceUsd.toFixed(2)}</p>
-        ) : (
-          <div className="skeleton h-6 w-24 mb-1" />
-        )}
-        <p className="text-sm text-base-content/60 font-mono">{listing.priceBsv.toFixed(8)} BSV</p>
+        <p className="text-xl font-bold text-primary">${totalPriceUsd.toFixed(2)}</p>
+        <p className="text-sm text-base-content/60 font-mono">{totalPriceBsv.toFixed(8)} BSV</p>
+        <div className="text-xs text-base-content/40 mt-1">
+          <div className="flex justify-between">
+            <span>Base price:</span>
+            <span>{listing.priceBsv.toFixed(8)} BSV</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Marketplace fee ({(marketFeeRate * 100).toFixed(0)}%):</span>
+            <span>{feeAmountBsv.toFixed(8)} BSV</span>
+          </div>
+        </div>
       </div>
     );
   };
