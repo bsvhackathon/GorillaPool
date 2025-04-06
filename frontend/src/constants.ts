@@ -1,4 +1,4 @@
-export const priceUsd = 1;
+export const priceUsd = .01;
 
 // API endpoints
 export const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';

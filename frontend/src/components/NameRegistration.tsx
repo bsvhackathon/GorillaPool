@@ -197,10 +197,15 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
 
             // Check if it has a listing (the list object with sale=true indicates it's for sale)
             if (marketData?.list && marketData.list.sale === true) {
+              // Ensure the price exists in the listing
+              if (!marketData.list.price) {
+                throw new Error('Listing is missing a valid price');
+              }
+              
               setNameStatus({
                 registered: true,
                 forSale: true,
-                price: marketData.list.price || 5, // Use the price from the listing
+                price: marketData.list.price,
                 outpoint // Store the outpoint for the purchase function
               });
             } else {
