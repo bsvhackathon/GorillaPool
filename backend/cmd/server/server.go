@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -282,6 +284,7 @@ func main() {
 		priceStr := c.FormValue("price", "")
 		successUrl := c.FormValue("success_url", "")
 		cancelUrl := c.FormValue("cancel_url", "")
+		address := c.FormValue("address", "")
 
 		// Validate required fields
 		if productId == "" || name == "" || priceStr == "" || successUrl == "" || cancelUrl == "" {
@@ -319,6 +322,10 @@ func main() {
 		formData.Add("line_items[0][quantity]", "1")
 		formData.Add("metadata[name]", name)
 		formData.Add("metadata[product_id]", productId)
+		// Store the customer's address in metadata if provided
+		if address != "" {
+			formData.Add("metadata[address]", address)
+		}
 		formData.Add("mode", "payment")
 		formData.Add("success_url", successUrl)
 		formData.Add("cancel_url", cancelUrl)
@@ -408,22 +415,279 @@ func main() {
 			})
 		}
 
-		// For debugging only - in production this would actually mint the name
+		// Check if payment was made for this name
+		paid := isNamePaid(c.Context(), handle)
+
+		// If the name hasn't been paid for, require payment first
+		if !paid {
+			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
+				"error":   "Payment required for this name",
+				"message": "Please complete payment before registering",
+			})
+		}
+
+		// If address is not provided, try to get it from Redis
+		if address == "" {
+			storedAddress, err := getNameAddress(c.Context(), handle)
+			if err == nil && storedAddress != "" {
+				address = storedAddress
+				log.Printf("Using stored address for %s: %s", handle, address)
+			} else {
+				log.Printf("No stored address found for %s, using default", handle)
+				address = "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6" // Default address
+			}
+		}
+
+		// Log registration attempt
 		log.Printf("Registering name: %s for address: %s", handle, address)
 
-		// TODO: Call actual mining logic here
+		// Call the actual mining API
+		client := &http.Client{}
+		miningPayload := map[string]string{
+			"domain":       handle,
+			"ownerAddress": address,
+		}
 
-		// For now, we'll simulate success
+		miningData, err := json.Marshal(miningPayload)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to prepare mining request",
+			})
+		}
 
-		// Create a mock transaction ID for testing
-		mockTxid := fmt.Sprintf("%064x", handle)
+		req, err := http.NewRequest("POST", "https://go-opns-mint-production.up.railway.app/mine", bytes.NewBuffer(miningData))
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create mining request",
+			})
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to call mining API: " + err.Error(),
+			})
+		}
+		defer resp.Body.Close()
+
+		// Handle mining API response
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Mining API returned error status: %s", resp.Status)
+			return c.Status(resp.StatusCode).JSON(fiber.Map{
+				"error": "Mining API returned error status: " + resp.Status,
+			})
+		}
+
+		// The mining API returns a simple string which is the txid
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error reading mining API response: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to read mining API response",
+			})
+		}
+
+		// The response is just the txid as a string (remove any quotes or whitespace)
+		txid := strings.Trim(string(bodyBytes), "\" \t\n\r")
+
+		// Mark the name as successfully mined
+		if err := markNameAsMined(c.Context(), handle, txid); err != nil {
+			log.Printf("Error marking name as mined in Redis: %v", err)
+			// Continue anyway - we still have the txid
+		}
+
+		log.Printf("Successfully registered name %s with txid %s", handle, txid)
 
 		// Return success response
 		return c.JSON(fiber.Map{
 			"success":       true,
-			"transactionId": mockTxid,
+			"transactionId": txid,
 			"name":          handle + "@1sat.name",
 			"message":       "Name registration initiated",
+		})
+	})
+
+	// Stripe webhook endpoint for handling payment events
+	app.Post("/stripe-webhook", func(c *fiber.Ctx) error {
+		// Get the stripe webhook secret from env
+		webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+		if webhookSecret == "" {
+			log.Println("Warning: STRIPE_WEBHOOK_SECRET not set")
+		}
+
+		// Verify the webhook signature
+		payload := c.Body()
+		// Signature is not currently validated but could be used with Stripe's SDK
+		_ = c.Get("Stripe-Signature") // We acknowledge the signature but don't use it yet
+
+		// For debugging
+		log.Printf("Received webhook: %s", string(payload))
+
+		// Parse the event
+		var event map[string]interface{}
+		if err := json.Unmarshal(payload, &event); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid JSON payload",
+			})
+		}
+
+		// Get the event type
+		eventType, ok := event["type"].(string)
+		if !ok {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing event type",
+			})
+		}
+
+		// Only process checkout.session.completed events
+		if eventType != "checkout.session.completed" {
+			log.Printf("Ignoring event of type: %s", eventType)
+			return c.JSON(fiber.Map{
+				"received": true,
+			})
+		}
+
+		// Extract session data
+		sessionData, ok := event["data"].(map[string]interface{})
+		if !ok {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid event data",
+			})
+		}
+
+		session, ok := sessionData["object"].(map[string]interface{})
+		if !ok {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid session data",
+			})
+		}
+
+		// Check payment status
+		paymentStatus, ok := session["payment_status"].(string)
+		if !ok || paymentStatus != "paid" {
+			log.Printf("Payment not complete. Status: %s", paymentStatus)
+			return c.JSON(fiber.Map{
+				"received": true,
+				"status":   "payment_incomplete",
+			})
+		}
+
+		// Get metadata
+		metadata, ok := session["metadata"].(map[string]interface{})
+		if !ok {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing metadata",
+			})
+		}
+
+		// Extract the name and customer details
+		name, ok := metadata["name"].(string)
+		if !ok || name == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Missing name in metadata",
+			})
+		}
+
+		// Get the address from metadata if available
+		address, ok := metadata["address"].(string)
+		if !ok || address == "" {
+			// Fallback to default address if not provided
+			address = "1sat4utxoLYSZb3zvWH8vZ9ULhGbPZEPi6"
+			log.Printf("Using default address for %s: %s", name, address)
+		}
+
+		// Get customer details from the session
+		customerDetails, ok := session["customer_details"].(map[string]interface{})
+		if !ok {
+			log.Println("Missing customer details")
+		}
+
+		// Get customer email or use a default
+		var customerEmail string
+		if email, ok := customerDetails["email"].(string); ok {
+			customerEmail = email
+		} else {
+			customerEmail = "unknown@example.com"
+		}
+
+		log.Printf("Processing successful payment for name: %s, customer: %s", name, customerEmail)
+
+		// Mark the name as paid in Redis
+		if err := markNameAsPaid(c.Context(), name, address); err != nil {
+			log.Printf("Error marking name as paid in Redis: %v", err)
+			// Continue anyway - we still want to try registering the name
+		}
+
+		// Call the actual mining API
+		client := &http.Client{}
+		miningPayload := map[string]string{
+			"domain":       name,
+			"ownerAddress": address,
+		}
+
+		miningData, err := json.Marshal(miningPayload)
+		if err != nil {
+			log.Printf("Error preparing mining request: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to prepare mining request",
+			})
+		}
+
+		req, err := http.NewRequest("POST", "https://go-opns-mint-production.up.railway.app/mine", bytes.NewBuffer(miningData))
+		if err != nil {
+			log.Printf("Error creating mining request: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to create mining request",
+			})
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Error calling mining API: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to call mining API: " + err.Error(),
+			})
+		}
+		defer resp.Body.Close()
+
+		// Handle mining API response
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Mining API returned error status: %s", resp.Status)
+			return c.Status(resp.StatusCode).JSON(fiber.Map{
+				"error": "Mining API returned error status: " + resp.Status,
+			})
+		}
+
+		// The mining API returns a simple string which is the txid
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error reading mining API response: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to read mining API response",
+			})
+		}
+
+		// The response is just the txid as a string (remove any quotes or whitespace)
+		txid := strings.Trim(string(bodyBytes), "\" \t\n\r")
+
+		// Mark the name as successfully mined
+		if err := markNameAsMined(c.Context(), name, txid); err != nil {
+			log.Printf("Error marking name as mined in Redis: %v", err)
+			// Continue anyway - we still have the txid
+		}
+
+		log.Printf("Successfully registered name %s with txid %s", name, txid)
+
+		// Return success
+		return c.JSON(fiber.Map{
+			"received":      true,
+			"success":       true,
+			"name":          name + "@1sat.name",
+			"transactionId": txid,
 		})
 	})
 
@@ -612,4 +876,44 @@ func main() {
 	if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}
+}
+
+// Helper function to check if a name has been paid for
+func isNamePaid(ctx context.Context, name string) bool {
+	result, err := rdb.HGet(ctx, "paid_names", name).Bool()
+	if err != nil {
+		return false
+	}
+	return result
+}
+
+// Helper function to mark a name as paid
+func markNameAsPaid(ctx context.Context, name string, address string) error {
+	// Store name payment status
+	if err := rdb.HSet(ctx, "paid_names", name, true).Err(); err != nil {
+		return err
+	}
+
+	// Store customer address for this name
+	if err := rdb.HSet(ctx, "name_addresses", name, address).Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Helper function to mark a name as successfully mined
+func markNameAsMined(ctx context.Context, name string, txid string) error {
+	// Store the transaction ID
+	if err := rdb.HSet(ctx, "name_txids", name, txid).Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Helper function to get the address for a name
+func getNameAddress(ctx context.Context, name string) (string, error) {
+	address, err := rdb.HGet(ctx, "name_addresses", name).Result()
+	return address, err
 }
