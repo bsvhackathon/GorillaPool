@@ -190,37 +190,62 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
 
   // Setup wallet event listeners
   useEffect(() => {
-    // Don't set up event listeners if not connected
-    if (!isConnected || !wallet?.on) return;
+    if (!wallet?.on) return;
 
     // Define event handlers
     const handleSwitchAccount = () => {
       console.log('Wallet account switched');
-      if (fetchAddressesRef.current) {
-        fetchAddressesRef.current().catch(err => console.error('Error after account switch:', err));
-      }
-      if (loadSocialProfileRef.current) {
-        loadSocialProfileRef.current().catch(err => console.error('Error loading profile after account switch:', err));
+      
+      // First check if we're connected before processing account switch
+      if (isConnected) {
+        // Update connected state to trigger a refresh of wallet-dependent data
+        setIsConnected(true);
+        
+        // Fetch addresses again after account switch
+        if (fetchAddressesRef.current) {
+          fetchAddressesRef.current().catch(err => {
+            console.error('Error after account switch:', err);
+            // If we can't fetch addresses after account switch, the connection might be broken
+            if (isUnauthorizedError(err)) {
+              resetWalletState();
+            }
+          });
+        }
+        
+        // Try to load social profile after account switch
+        if (loadSocialProfileRef.current) {
+          loadSocialProfileRef.current().catch(err => {
+            console.error('Error loading profile after account switch:', err);
+          });
+        }
       }
     };
 
     const handleSignedOut = () => {
       console.log('Wallet signed out');
+      // Always reset the wallet state when signed out
       resetWalletState();
+      
+      // Also try to properly disconnect
+      if (wallet.disconnect) {
+        wallet.disconnect().catch(error => {
+          console.error('Non-critical error during wallet.disconnect on signedOut event:', error);
+        });
+      }
     };
 
-    // Set up event listeners
+    // Set up event listeners whether connected or not to catch initial connection events
     wallet.on('switchAccount', handleSwitchAccount);
     wallet.on('signedOut', handleSignedOut);
     
-    // Clean up on unmount or if connection state changes
+    // Clean up on unmount
     return () => {
       if (wallet.removeListener) {
         wallet.removeListener('switchAccount', handleSwitchAccount);
         wallet.removeListener('signedOut', handleSignedOut);
       }
     };
-  }, [isConnected, wallet, resetWalletState]);
+  }, [isConnected, wallet, resetWalletState, isUnauthorizedError]);
 
   const connectWallet = useCallback(async () => {
     try {

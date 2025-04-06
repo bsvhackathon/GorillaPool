@@ -5,6 +5,7 @@ import './index.css'
 import { WalletProvider } from './context/WalletContext'
 import { YoursProvider } from 'yours-wallet-provider'
 import { StripeProvider } from './context/StripeContext'
+import { SettingsProvider } from './context/SettingsContext'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // Initialize theme from localStorage or default to user preference or 'light'
@@ -45,7 +46,9 @@ ReactDOM.createRoot(rootElement).render(
       <YoursProvider>
         <WalletProvider>
           <StripeProvider>
-            <App />
+            <SettingsProvider>
+              <App />
+            </SettingsProvider>
           </StripeProvider>
         </WalletProvider>
       </YoursProvider>

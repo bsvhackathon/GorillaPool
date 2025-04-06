@@ -12,4 +12,4 @@ export const stripeProductId = import.meta.env.VITE_STRIPE_PRODUCT_ID || '';
 
 // Add the marketplace fee constants
 export const marketAddress = "15q8YQSqUa9uTh6gh4AVixxq29xkpBBP9z";
-export const marketFeeRate = 0.15; // 15% marketplace fee
+export const marketFeeRate = 0.15;
