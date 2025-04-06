@@ -14,14 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/4chain-ag/go-overlay-services/pkg/core/engine"
 	"github.com/4chain-ag/go-overlay-services/pkg/core/gasp/core"
-	"github.com/gofiber/fiber/v2/middleware/compress"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-
-	// storageRedis "github.com/b-open-io/bsv21-overlay/storage/redis"
 	"github.com/b-open-io/bsv21-overlay/topics"
+	"github.com/bitcoin-sv/go-paymail/logging"
+	"github.com/bitcoin-sv/go-paymail/server"
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/overlay"
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
@@ -30,8 +29,11 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/broadcaster"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker/headers_client"
 	"github.com/bsvhackathon/GorillaPool/backend/opns"
+	opnspaymail "github.com/bsvhackathon/GorillaPool/backend/paymail"
 	"github.com/bsvhackathon/GorillaPool/backend/storage"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -567,6 +569,45 @@ func main() {
 		}
 	}
 
+	go func() {
+		logger := logging.GetDefaultLogger()
+
+		sl := server.PaymailServiceLocator{}
+		sl.RegisterPaymailService(new(opnspaymail.OpnsServiceProvider))
+		sl.RegisterPikeContactService(new(opnspaymail.OpnsServiceProvider))
+		sl.RegisterPikePaymentService(new(opnspaymail.OpnsServiceProvider))
+
+		var err error
+		port := 3001
+		// portEnv := os.Getenv("PORT")
+		// if portEnv != "" {
+		// 	if port, err = strconv.Atoi(portEnv); err != nil {
+		// 		logger.Fatal().Msg(err.Error())
+		// 	}
+		// }
+		// Custom server with lots of customizable goodies
+		config, err := server.NewConfig(
+			&sl,
+			server.WithBasicRoutes(),
+			server.WithP2PCapabilities(),
+			server.WithBeefCapabilities(),
+			// server.WithDomain("1sat.app"),
+			server.WithDomain(os.Getenv("PAYMAIL_DOMAIN")),
+			// server.WithDomain("localhost:3000"),
+			// server.WithGenericCapabilities(),
+			server.WithPort(port),
+			// server.WithServiceName("BsvAliasCustom"),
+			server.WithTimeout(15*time.Second),
+			// server.WithCapabilities(customCapabilities()),
+		)
+		config.Prefix = "https://" //normally paymail requires https, but for demo purposes we'll use http
+		if err != nil {
+			logger.Fatal().Msg(err.Error())
+		}
+
+		// Create & start the server
+		server.StartServer(server.CreateServer(config), config.Logger)
+	}()
 	// Start the server on the specified port
 	if err := app.Listen(fmt.Sprintf(":%d", PORT)); err != nil {
 		log.Fatalf("Error starting server: %v", err)
