@@ -8,16 +8,16 @@ For an in-depth look at how it all works, check out our [detailed presentation](
 
 ## Core Concepts
 
-- **Ordinal Names**: Each 1sat.name is inscribed as a Bitcoin ordinal, making it a unique digital asset that can be traded, sold, or transferred.
-- **Decentralized Trading**: Names can be bought and sold on any compatible marketplace that supports 1sat ordinals.
+- **Ordinal Names**: Each 1sat.name is inscribed as a 1sat ordinal, making it a unique digital asset that can be traded, sold, or transferred.
+- **Decentralized Trading**: Names can be bought and sold on any compatible marketplace that supports 1sat ordinals and ordlock contracts.
 - **Cross-Domain Functionality**: Names follow the ordinal wherever it goes, maintaining their recognition across different platforms.
 - **Wallet Compatibility**: Easily supported by any wallet that handles 1sat ordinals.
 
 ## Features
 
-- **Affordable Names**: Each name costs just $5, making it accessible to everyone
+- **Affordable Names**: Each name costs just $1, making it accessible to everyone
 - **Multiple Payment Options**: Pay with credit card (via Stripe) or directly with BSV
-- **Interactive UI**: Modern interface with dark mode support
+- **Interactive UI**: Modern interface with theme support
 - **Inventory Management**: Easily view and manage your purchased names
 - **Marketplace Integration**: Buy, sell, and trade names with other users
 - **Real-Time Availability**: Instantly check if a name is available
