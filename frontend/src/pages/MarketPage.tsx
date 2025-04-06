@@ -337,7 +337,7 @@ const MarketPage = () => {
       );
     }
     
-    // Calculate fee amounts
+    // Calculate fee amounts (still calculate fees for the functionality)
     const feeAmountBsv = listing.priceBsv * marketFeeRate;
     const totalPriceBsv = listing.priceBsv + feeAmountBsv;
     
@@ -349,16 +349,6 @@ const MarketPage = () => {
       <div className="mt-2 mb-3">
         <p className="text-xl font-bold text-primary">${totalPriceUsd.toFixed(2)}</p>
         <p className="text-sm text-base-content/60 font-mono">{totalPriceBsv.toFixed(8)} BSV</p>
-        <div className="text-xs text-base-content/40 mt-1">
-          <div className="flex justify-between">
-            <span>Base price:</span>
-            <span>{listing.priceBsv.toFixed(8)} BSV</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Marketplace fee ({(marketFeeRate * 100).toFixed(0)}%):</span>
-            <span>{feeAmountBsv.toFixed(8)} BSV</span>
-          </div>
-        </div>
       </div>
     );
   };
