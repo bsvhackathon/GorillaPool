@@ -26,6 +26,29 @@ interface SocialProfile {
   avatar?: string;
 }
 
+// Define Ordinal interface based on the Yours Wallet API
+interface Ordinal {
+  id: string;
+  outpoint: string;
+  origin: {
+    outpoint: string;
+    data?: string;
+  };
+  typeInfo: {
+    content?: string;
+    contentType?: string;
+    encoding?: string;
+    mime?: string;
+  };
+  [key: string]: any; // For any additional properties returned by the wallet
+}
+
+// Define types for the paginated ordinals response
+interface PaginatedOrdinalsResponse {
+  ordinals: Ordinal[];
+  from?: string;
+}
+
 interface WalletContextType {
   isConnected: boolean;
   addresses: WalletAddresses;
@@ -37,6 +60,8 @@ interface WalletContextType {
   loadSocialProfile: () => Promise<void>;
   fetchAddresses: () => Promise<void>;
   hasValidAddresses: boolean;
+  getOrdinals: (params?: { from?: string; limit?: number }) => Promise<PaginatedOrdinalsResponse>;
+  purchaseOrdinal: (params: { outpoint: string; marketplaceRate?: number; marketplaceAddress?: string }) => Promise<string>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -327,6 +352,78 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
     }
   }, [isConnected, isUnauthorizedError, resetWalletState, wallet]);
 
+  // Get ordinals from wallet
+  const getOrdinals = useCallback(async (params?: { from?: string; limit?: number }): Promise<PaginatedOrdinalsResponse> => {
+    if (!isConnected || !wallet.getOrdinals) {
+      return { ordinals: [] };
+    }
+    
+    try {
+      // If params are provided, use pagination
+      if (params) {
+        const response = await wallet.getOrdinals(params);
+        // Ensure we're returning a consistent format
+        return {
+          ordinals: response.ordinals || [],
+          from: response.from
+        };
+      }
+      
+      // Otherwise get all ordinals (could be slow if user has many)
+      const ordinals = await wallet.getOrdinals();
+      // Handle both array response and paginated response
+      if (Array.isArray(ordinals)) {
+        return { ordinals };
+      }
+      return {
+        ordinals: ordinals.ordinals || [],
+        from: ordinals.from
+      };
+    } catch (error) {
+      console.error('Error fetching ordinals:', error);
+      
+      // Reset wallet state if unauthorized
+      if (isUnauthorizedError(error)) {
+        resetWalletState();
+      }
+      
+      return { ordinals: [] };
+    }
+  }, [isConnected, wallet, isUnauthorizedError, resetWalletState]);
+
+  // Purchase ordinal from marketplace
+  const purchaseOrdinal = useCallback(async (params: { 
+    outpoint: string; 
+    marketplaceRate?: number; 
+    marketplaceAddress?: string 
+  }): Promise<string> => {
+    if (!isConnected || !wallet.purchaseOrdinal) {
+      throw new Error('Wallet not connected or does not support ordinal purchases');
+    }
+
+    setIsProcessing(true);
+    
+    try {
+      const txid = await wallet.purchaseOrdinal(params);
+      if (!txid) {
+        throw new Error('No transaction ID returned from purchase');
+      }
+      console.log('Ordinal purchase successful, txid:', txid);
+      return txid;
+    } catch (error) {
+      console.error('Error purchasing ordinal:', error);
+      
+      // Reset wallet state if unauthorized
+      if (isUnauthorizedError(error)) {
+        resetWalletState();
+      }
+      
+      throw error;
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [isConnected, wallet, isUnauthorizedError, resetWalletState]);
+
   const contextValue: WalletContextType = {
     isConnected,
     addresses,
@@ -337,7 +434,9 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
     isProcessing,
     loadSocialProfile,
     fetchAddresses,
-    hasValidAddresses
+    hasValidAddresses,
+    getOrdinals,
+    purchaseOrdinal
   };
 
   return (

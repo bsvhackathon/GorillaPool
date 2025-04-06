@@ -1,8 +1,8 @@
 import { useState, type FC, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl } from '../constants';
-import StripePaymentModal from './StripePaymentModal';
+import { priceUsd, apiUrl, marketApiUrl, stripeProductId } from '../constants';
+import { LookupQuestion } from '@bsv/sdk';
 
 interface NameRegistrationProps {
   onBuy: (name: string) => Promise<void>;
@@ -16,139 +16,180 @@ interface NameStatus {
 
 const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   const [nameInput, setNameInput] = useState('');
-  const [nameStatus, setNameStatus] = useState<NameStatus | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
   const [isCheckingName, setIsCheckingName] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [nameStatus, setNameStatus] = useState<NameStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isFocused, setIsFocused] = useState(false);  
-  // New state for Stripe payment modal
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [addresses, setAddresses] = useState<{bsvAddress?: string; ordAddress?: string}>({});
   
-  // Get both the context and direct wallet provider
-  const { 
-    isConnected, 
-    isProcessing, 
-    addresses, 
-    connectWallet, 
-  } = useWallet();
+  // Get wallet from context
+  const { isConnected, isProcessing, connectWallet } = useWallet();
   const wallet = useYoursWallet();
   
-  // Clear error when component mounts
+  // Check for return from Stripe Checkout
   useEffect(() => {
-    setError(null);
-  }, []);
+    const query = new URLSearchParams(window.location.search);
+    
+    if (query.get("success")) {
+      const purchasedName = localStorage.getItem("pendingNameRegistration");
+      if (purchasedName) {
+        // Registration was successful
+        const formattedName = `${purchasedName}@1sat.name`;
+        
+        // Register the name and notify parent component
+        registerNameWithApi(purchasedName)
+          .then(() => onBuy(formattedName))
+          .then(() => {
+            // Clear storage and url parameters
+            localStorage.removeItem("pendingNameRegistration");
+            window.history.replaceState({}, document.title, window.location.pathname);
+          })
+          .catch(err => {
+            setError(`Payment was successful but name registration failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            localStorage.removeItem("pendingNameRegistration");
+            window.history.replaceState({}, document.title, window.location.pathname);
+          });
+      }
+    }
 
-  // Check name availability with API
-  const checkNameAvailability = async (name: string): Promise<NameStatus> => {
-    if (!name) return { registered: false };
+    if (query.get("canceled")) {
+      // User canceled the checkout
+      setError("Name registration was canceled. You can try again when you're ready.");
+      localStorage.removeItem("pendingNameRegistration");
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [onBuy]);
+  
+  // When the name input changes, check if it's available
+  useEffect(() => {
+    // Clear any existing error
+    if (error) {
+      setError(null);
+    }
+    
+    // Wait for debounce
+    const delay = setTimeout(() => {
+      if (nameInput && nameInput.length >= 3) {
+        checkNameAvailability(nameInput);
+      } else if (nameInput) {
+        // Name is too short, don't bother checking availability
+        setNameStatus(null);
+      }
+    }, 500);
+    
+    return () => clearTimeout(delay);
+  }, [nameInput, error]);
+
+  // Update wallet addresses when connected
+  useEffect(() => {
+    if (isConnected && wallet?.getAddresses) {
+      getAddresses();
+    }
+  }, [isConnected, wallet]);
+  
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.trim().toLowerCase();
+    // Only allow letters and numbers
+    const sanitized = value.replace(/[^a-z0-9]/g, '');
+    setNameInput(sanitized);
+  };
+  
+  const handleBuyClick = async () => {
+    if (!isConnected) {
+      // Connect wallet first
+      try {
+        await connectWallet();
+      } catch (err) {
+        console.error('Error connecting wallet:', err);
+        setError(`Failed to connect wallet: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+      return;
+    }
+    
+    handleBuy();
+  };
+  
+  const checkNameAvailability = async (name: string): Promise<void> => {
+    if (!name) return;
     
     setIsCheckingName(true);
+    setNameStatus(null);
+    setError(null);
     
     try {
       // Check if the name is registered
-      const nameResponse = await fetch(`${apiUrl}/check-name`, {
+      const response = await fetch(`${apiUrl}/lookup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ handle: name })
+        body: JSON.stringify({
+          service: 'ls_OpNS',
+          query: {
+            event: `mine:${name}`,
+          }
+        } as LookupQuestion)
       });
       
-      if (!nameResponse.ok) {
-        throw new Error('Name check failed');
-      }
-      
-      const nameData = await nameResponse.json();
-      
-      // If registered, check if it's for sale in the market
-      if (nameData.registered) {
-        try {
-          const marketResponse = await fetch(`${marketApiUrl}/check-name`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ handle: name })
-          });
-          
-          if (marketResponse.ok) {
-            const marketData = await marketResponse.json();
-            return {
-              registered: true,
-              forSale: marketData.forSale || false,
-              price: marketData.price || 0
-            };
-          }
-        } catch (marketError) {
-          console.error('Error checking market:', marketError);
+      if (!response.ok) {
+        if (response.status === 404) {
+          // Name not found, it's available
+          setNameStatus({ registered: false });
+          return;
         }
-        
-        // Default to registered but not for sale if market check fails
-        return { registered: true, forSale: false };
+        throw new Error(`Failed to check name availability: ${response.statusText}`);
       }
       
-      // Name is available
-      return { registered: false };
-    } catch (error) {
-      console.error('Error checking name availability:', error);
-      // For demo, return a mock response
-      return { registered: name.includes('taken') };
+      // Data is received but not used directly, just indicates the name exists
+      await response.json();
+      
+      // Check if it's for sale on the marketplace
+      const marketResponse = await fetch(`${marketApiUrl}/name/${name}`);
+      
+      if (marketResponse.ok) {
+        const marketData = await marketResponse.json();
+        setNameStatus({ 
+          registered: true,
+          forSale: true,
+          price: marketData.price || 5 // Default to $5 if price not specified
+        });
+      } else {
+        // Name is registered but not for sale
+        setNameStatus({ registered: true, forSale: false });
+      }
+    } catch (err) {
+      console.error('Error checking name:', err);
+      setError(`Failed to check name availability: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsCheckingName(false);
     }
   };
   
-  const handleInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = e.target.value;
-    // Sanitize input: convert to lowercase, remove spaces and special characters
-    const sanitizedValue = rawValue.toLowerCase().replace(/[^a-z0-9]/g, '');
-    
-    // Only update if the sanitized value is different from raw value
-    if (sanitizedValue !== rawValue) {
-      e.target.value = sanitizedValue;
-    }
-    
-    // Store only the name part without the suffix
-    setNameInput(sanitizedValue);
-    setNameStatus(null);
-    setError(null);
-    
-    if (sanitizedValue) {
-      const status = await checkNameAvailability(sanitizedValue);
-      setNameStatus(status);
-    }
-  };
-
-  const handleBuyClick = async () => {
-    // If not connected, trigger wallet connection first
-    if (!isConnected) {
-      try {
-        console.log('Wallet provider status before connect:',
-          'isReady:', wallet.isReady,
-          'isConnected:', wallet.isConnected
-        );
-        
-        await connectWallet();
-        console.log('Wallet connected successfully');
-        
-        // Verify connection after connect
-        console.log('Wallet provider status after connect:',
-          'isReady:', wallet.isReady,
-          'isConnected:', wallet.isConnected
-        );
-        
-        // After connection, the component will re-render
-        // and the button state will update appropriately
-        return;
-      } catch (err) {
-        console.error('Connection error:', err);
-        setError(`Failed to connect wallet: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        return;
+  const getAddresses = async () => {
+    try {
+      if (!wallet?.getAddresses) {
+        throw new Error('Wallet does not support getAddresses method');
       }
+      
+      const walletAddresses = await wallet.getAddresses();
+      
+      if (walletAddresses && walletAddresses.bsvAddress) {
+        setAddresses({
+          bsvAddress: walletAddresses.bsvAddress,
+          ordAddress: walletAddresses.ordAddress
+        });
+        return walletAddresses;
+      }
+      
+      console.error('Ordinal address not available in wallet response');
+      setError('Could not retrieve ordinal address from wallet. Please ensure your wallet supports ordinals.');
+      return null;
+    } catch (err) {
+      console.error('Error getting addresses:', err);
+      setError(`Failed to get wallet addresses: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      return null;
     }
-    
-    // If connected, proceed with the buy flow
-    await handleBuy();
   };
 
   const registerNameWithApi = async (handle: string): Promise<boolean> => {
@@ -161,7 +202,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         body: JSON.stringify({ 
           handle,
           // Include wallet information if needed by the API
-          address: addresses.bsvAddress || ''
+          address: addresses?.bsvAddress || ''
         })
       });
       
@@ -214,27 +255,42 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         setIsLoading(false);
       }
     } else {
-      // For new registrations, open the Stripe payment modal
-      setIsPaymentModalOpen(true);
-    }
-  };
-
-  // Handle successful payment and name registration
-  const handlePaymentSuccess = async (name: string) => {
-    try {
-      // Register the name with the API after payment
-      console.log(`Registering name after payment: ${name}`);
-      await registerNameWithApi(nameInput);
-      
-      // Call the onBuy callback
-      await onBuy(name);
-      
-      // Clear the input
-      setNameInput('');
-      setNameStatus(null);
-    } catch (err) {
-      console.error('Error registering name after payment:', err);
-      setError(`Payment was successful but name registration failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      // For new registrations, redirect to Stripe Checkout
+      try {
+        setIsLoading(true);
+        
+        // Save the name being registered in localStorage for retrieval after payment
+        localStorage.setItem("pendingNameRegistration", nameInput);
+        
+        // Create Stripe checkout session
+        const response = await fetch(`${apiUrl}/create-checkout-session`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            productId: stripeProductId,
+            name: nameInput,
+            price: priceUsd * 100, // Convert to cents
+            success_url: `${window.location.origin}${window.location.pathname}?success=true`,
+            cancel_url: `${window.location.origin}${window.location.pathname}?canceled=true`,
+          }),
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || 'Failed to create checkout session');
+        }
+        
+        const { url } = await response.json();
+        
+        // Redirect to Stripe checkout
+        window.location.href = url;
+      } catch (err) {
+        console.error('Error creating checkout session:', err);
+        setError(`Failed to create checkout session: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setIsLoading(false);
+      }
     }
   };
 
@@ -353,14 +409,6 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
           </div>
         </div>
       </div>
-      
-      {/* Stripe Payment Modal */}
-      <StripePaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        name={nameInput}
-        onSuccess={handlePaymentSuccess}
-      />
     </>
   );
 };

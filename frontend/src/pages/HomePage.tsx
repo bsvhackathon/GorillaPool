@@ -1,67 +1,66 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import NameRegistration from '../components/NameRegistration';
 import OwnedNames from '../components/OwnedNames';
 import { useWallet } from '../context/WalletContext';
 
-// Mock interface for name data
-interface NameData {
-  id: string;
-  name: string;
-  registrationDate: Date;
-}
-
 const HomePage = () => {
-  const { isConnected, addresses } = useWallet();
-  const [ownedNames, setOwnedNames] = useState<NameData[]>([]);
-
-  // Determine display address
-  const displayAddress = addresses.bsvAddress || addresses.ordAddress || '';
-
-  // Mock loading of owned names when wallet is connected
-  useEffect(() => {
-    if (isConnected && displayAddress) {
-      // In a real implementation, this would fetch from your backend
-      const mockNames = [
-        {
-          id: '1',
-          name: 'example@1sat.name',
-          registrationDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
-        },
-      ];
-      setOwnedNames(mockNames);
-    } else {
-      setOwnedNames([]);
-    }
-  }, [isConnected, displayAddress]);
-
-  const handleBuy = async (name: string) => {
-    console.log(`Purchased name: ${name}`);
+  const [lastRegistered, setLastRegistered] = useState<string | null>(null);
+  const { isConnected } = useWallet();
+  
+  // Handle successful name registration or purchase
+  const handleNameAcquired = async (name: string) => {
+    console.log('Name acquired:', name);
+    setLastRegistered(name);
     
-    // Add new name to owned names
-    const newName: NameData = {
-      id: Date.now().toString(), // Use timestamp as a temporary ID
-      name,
-      registrationDate: new Date(),
-    };
-    
-    setOwnedNames(prev => [...prev, newName]);
+    // Show a success message temporarily
+    setTimeout(() => {
+      setLastRegistered(null);
+    }, 5000);
   };
-
-  const handleSell = async (nameId: string) => {
-    console.log(`Initiated sell for name ID: ${nameId}`);
+  
+  // Handle selling a name
+  const handleSellName = async (outpoint: string, name: string) => {
+    // This would typically open a modal or navigate to a page to set price
+    console.log(`Listing ${name} for sale. Outpoint: ${outpoint}`);
     
-    // Remove name from owned names
-    setOwnedNames(prev => prev.filter(name => name.id !== nameId));
+    // For demo purposes, we'll just alert
+    alert(`To sell "${name}", you would be redirected to the marketplace listing page.`);
     
-    // In a real implementation, this would create a transaction
-    // to transfer the name to a marketplace or directly to a buyer
+    // In reality, you would:
+    // 1. Navigate to a listing page or open a modal
+    // 2. Let user set price and terms
+    // 3. Call API to list the name for sale
+    // 4. Update local state
   };
-
+  
   return (
-    <>
-      <NameRegistration onBuy={handleBuy} />
-      <OwnedNames names={ownedNames} onSell={handleSell} />
-    </>
+    <div>
+      {lastRegistered && (
+        <div className="alert alert-success mb-6 shadow-lg">
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="stroke-current flex-shrink-0 h-6 w-6" 
+            fill="none" 
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeWidth="2" 
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" 
+            />
+          </svg>
+          <span>Congratulations! <strong>{lastRegistered}</strong> is now yours!</span>
+        </div>
+      )}
+      
+      <NameRegistration onBuy={handleNameAcquired} />
+      
+      {isConnected && (
+        <OwnedNames onSell={handleSellName} />
+      )}
+    </div>
   );
 };
 

@@ -1,15 +1,28 @@
 import './App.css'
 import Navbar, { type PageType } from './components/Navbar'
 import { useWallet } from './context/WalletContext'
-import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import MarketPage from './pages/MarketPage'
 import SettingsPage from './pages/SettingsPage'
+import { useEffect } from 'react'
 
 // Navigation wrapper to handle Navbar interactions
 const NavWrapper = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { isConnected, addresses, disconnectWallet, connectWallet, socialProfile, loadSocialProfile, hasValidAddresses } = useWallet();
+
+  // Handle Stripe Checkout return
+  useEffect(() => {
+    // The NameRegistration component handles the query parameters directly
+    // This is just a fallback if the user navigates directly to a different page with success/canceled params
+    const query = new URLSearchParams(location.search);
+    if (query.get("success") || query.get("canceled")) {
+      // Redirect to home page to handle the payment result
+      navigate('/', { replace: true });
+    }
+  }, [location.search, navigate]);
 
   // Determine display address
   const displayAddress = addresses.bsvAddress || addresses.ordAddress || '';
