@@ -284,6 +284,10 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   const handleDirectWalletPayment = async (satoshis: number) => {
     try {
       setIsLoading(true);
+
+      // ensure wallet is connected
+      await wallet.connect();
+
       setError('');
 
       if (!wallet || !isConnected) {
@@ -313,6 +317,12 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       console.log("Payment successful:", walletResponse);
       const txid = walletResponse.txid;
 
+      if (!addresses.ordAddress) {
+        setError('No ordinal address available');
+        setIsLoading(false);
+        return;
+      }
+
       // Mark the payment as complete by notifying the backend
       // This will register the name as paid in Redis
       const paymentCompleteResponse = await fetch(`${apiUrl}/payment-complete`, {
@@ -323,6 +333,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         body: JSON.stringify({
           name: nameInput,
           txid: txid,
+          address: addresses.ordAddress
         }),
       });
 

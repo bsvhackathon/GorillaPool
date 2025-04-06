@@ -830,8 +830,9 @@ func main() {
 	// Payment completion webhook
 	app.Post("/payment-complete", func(c *fiber.Ctx) error {
 		var request struct {
-			Name string `json:"name"`
-			Txid string `json:"txid"`
+			Name    string `json:"name"`
+			Txid    string `json:"txid"`
+			Address string `json:"address"` // Added address field to accept from frontend
 		}
 
 		if err := c.BodyParser(&request); err != nil {
@@ -854,25 +855,39 @@ func main() {
 			})
 		}
 
-		// Mark the name as paid in Redis
-		if err := markNameAsPaid(c.Context(), request.Name, "wallet-payment"); err != nil {
+		// Use the address provided by the frontend if available
+		// This should be their ordinals address from the wallet
+		userAddress := request.Address
+		if userAddress == "" {
+			userAddress = "wallet-payment" // Fallback only if no address provided
+			log.Printf("Warning: No address provided for %s, using placeholder", request.Name)
+		} else {
+			log.Printf("Using user's wallet address for %s: %s", request.Name, userAddress)
+		}
+
+		// Mark the name as paid in Redis with the user's wallet address
+		if err := markNameAsPaid(c.Context(), request.Name, userAddress); err != nil {
 			log.Printf("Error marking name as paid: %v", err)
 		}
 
-		// Now we need to register the name using the /register endpoint functionality
-		// Read from Redis any stored wallet address or use default
+		// Now we need to register the name using the mining API
+		// Get the address we just stored
 		address, err := getNameAddress(c.Context(), request.Name)
 		if err != nil || address == "" {
-			// No address stored, use wallet payment address as default
-			address = "wallet-payment"
+			log.Printf("Error getting stored address for %s: %v", request.Name, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to retrieve payment address",
+			})
 		}
 
 		// Call the actual mining API
 		client := &http.Client{}
 		miningPayload := map[string]string{
 			"domain":       request.Name,
-			"ownerAddress": address,
+			"ownerAddress": address, // Use the address we stored (user's wallet address)
 		}
+
+		log.Printf("Registering name %s for address %s", request.Name, address)
 
 		miningData, err := json.Marshal(miningPayload)
 		if err != nil {
