@@ -293,23 +293,21 @@ func (l *LookupService) Lookup(ctx context.Context, q *lookup.LookupQuestion) (a
 	}
 
 	for _, output := range outputs {
-		if output != nil {
-			if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
+		if beef, _, _, err := transaction.ParseBeef(output.Beef); err != nil {
+			return nil, err
+		} else {
+			if len(output.AncillaryBeef) > 0 {
+				if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
+					return nil, err
+				}
+			}
+			if beefBytes, err := beef.AtomicBytes(&output.Outpoint.Txid); err != nil {
 				return nil, err
 			} else {
-				if output.AncillaryBeef != nil {
-					if err = beef.MergeBeefBytes(output.AncillaryBeef); err != nil {
-						return nil, err
-					}
-				}
-				if beefBytes, err := beef.AtomicBytes(&output.Outpoint.Txid); err != nil {
-					return nil, err
-				} else {
-					answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
-						OutputIndex: output.Outpoint.OutputIndex,
-						Beef:        beefBytes,
-					})
-				}
+				answer.Outputs = append(answer.Outputs, &lookup.OutputListItem{
+					OutputIndex: output.Outpoint.OutputIndex,
+					Beef:        beefBytes,
+				})
 			}
 		}
 	}
