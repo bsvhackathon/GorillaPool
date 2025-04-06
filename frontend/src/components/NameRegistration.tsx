@@ -1,7 +1,8 @@
 import { useState, type FC, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl, marketFeeRate, marketAddress } from '../constants';
+import { priceUsd, apiUrl, marketApiUrl } from '../constants';
+import { useSettings } from '../context/SettingsContext';
 
 interface NameRegistrationProps {
   onBuy: (name: string) => Promise<void>;
@@ -29,46 +30,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   // Get wallet from context
   const { isConnected, isProcessing, connectWallet, purchaseOrdinal } = useWallet();
   const wallet = useYoursWallet();
-
-
-
-  const registerNameWithApi = useCallback(async (name: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError('');
-    
-    try {
-      // Create form data for the request
-      const formData = new URLSearchParams();
-      formData.append('handle', name);
-      
-      // Include wallet information if needed by the API
-      if (addresses?.bsvAddress) {
-        formData.append('address', addresses.bsvAddress);
-      }
-      
-      const response = await fetch(`${apiUrl}/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: formData.toString()
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || 'Registration failed');
-      }
-
-      const data = await response.json();
-      setTransaction(data.transactionId || null);
-      setIsLoading(false);
-      return data.success || false;
-    } catch (error) {
-      console.error('API registration error:', error);
-      setIsLoading(false);
-      throw error;
-    }
-  }, [addresses?.bsvAddress]);
+  const { preferredPayment } = useSettings();
 
   // Check for return from Stripe Checkout
   useEffect(() => {
@@ -77,22 +39,20 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     if (query.get("success")) {
       const purchasedName = localStorage.getItem("pendingNameRegistration");
       if (purchasedName) {
-        // Registration was successful
+        // Show success message - the actual registration is handled by the webhook
         const formattedName = `${purchasedName}@1sat.name`;
-
-        // Register the name and notify parent component
-        registerNameWithApi(purchasedName)
-          .then(() => onBuy(formattedName))
-          .then(() => {
-            // Clear storage and url parameters
-            localStorage.removeItem("pendingNameRegistration");
-            window.history.replaceState({}, document.title, window.location.pathname);
-          })
-          .catch(err => {
-            setError(`Payment was successful but name registration failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            localStorage.removeItem("pendingNameRegistration");
-            window.history.replaceState({}, document.title, window.location.pathname);
-          });
+        
+        // Notify parent component of the purchase
+        onBuy(formattedName).catch(err => {
+          console.error("Error notifying of purchase:", err);
+        });
+        
+        // Show registration being processed message
+        setTransaction("processing"); // Using a special value to indicate registration is being processed
+        
+        // Clear storage and url parameters
+        localStorage.removeItem("pendingNameRegistration");
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
 
@@ -102,7 +62,7 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       localStorage.removeItem("pendingNameRegistration");
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [onBuy, registerNameWithApi]);
+  }, [onBuy]);
 
   // When the name input changes, check if it's available
   useEffect(() => {
@@ -268,8 +228,6 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
     }
   };
 
-
-
   const createStripeCheckout = async (name: string, priceInCents: number): Promise<void> => {
     try {
       // Get wallet address if available
@@ -319,65 +277,167 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
   };
 
   const handleBuy = async () => {
-    if (!nameInput) return;
-    if (nameStatus?.registered && !nameStatus.forSale) {
-      setError('This name is already registered and not for sale.');
+    if (!isConnected) {
+      try {
+        await connectWallet();
+      } catch (err) {
+        console.error('Error connecting wallet:', err);
+        setError(`Failed to connect wallet: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        return;
+      }
+    }
+
+    if (!nameStatus) {
+      setError('Please check name availability first');
       return;
     }
 
-    // Handle marketplace purchase directly
-    if (nameStatus?.registered && nameStatus.forSale && nameStatus.outpoint) {
-      setIsLoading(true);
-      setError(null);
+    if (nameStatus.registered && !nameStatus.forSale) {
+      setError('This name is already registered and not for sale');
+      return;
+    }
 
-      try {
-        // Create the formatted name with the suffix
-        const formattedName = `${nameInput}@1sat.name`;
-
-        // Calculate marketplace fee (5%)
-        const marketplaceRate = marketFeeRate
-        const marketplaceAddress = marketAddress
-
-        console.log(`Purchasing ${formattedName} from marketplace for $${nameStatus.price}`);
-
-        // Purchase parameters
-        const purchaseParams = {
-          outpoint: nameStatus.outpoint,
-          marketplaceRate,
-          marketplaceAddress
-        };
-
-        // Execute the purchase
-        const txid = await purchaseOrdinal(purchaseParams);
-        console.log(`Purchase successful, txid: ${txid}`);
-
-        // If we got here, transaction was successful
-        await onBuy(formattedName);
-
-        // Clear the input
-        setNameInput('');
-        setNameStatus(null);
-      } catch (err) {
-        console.error('Error buying name from marketplace:', err);
-        setError(`Failed to purchase name: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      } finally {
-        setIsLoading(false);
-      }
+    if (nameStatus.registered && nameStatus.forSale) {
+      // Name is for sale on marketplace, use purchaseOrdinal
+      handleBuyFromMarketplace();
     } else {
-      // For new registrations, redirect to Stripe Checkout
-      try {
-        setIsLoading(true);
-
-        // Save the name being registered in localStorage for retrieval after payment
-        localStorage.setItem("pendingNameRegistration", nameInput);
-
-        // Create Stripe checkout session
-        await createStripeCheckout(nameInput, priceUsd * 100);
-      } catch (err) {
-        console.error('Error creating checkout session:', err);
-        setError(`Failed to create checkout session: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        setIsLoading(false);
+      // Name is available for registration
+      if (preferredPayment === 'wallet') {
+        handleDirectWalletPayment();
+      } else {
+        handleStripePayment();
       }
+    }
+  };
+
+  // Pay directly with Yours wallet
+  const handleDirectWalletPayment = async () => {
+    if (!nameInput) return;
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      if (!wallet || !isConnected) {
+        throw new Error('Wallet is not connected');
+      }
+      
+      // Calculate price in satoshis (1 BSV = 100,000,000 satoshis)
+      const exchangeRate = wallet.getExchangeRate ? await wallet.getExchangeRate() : 100;
+      const satoshis = Math.round(priceUsd * 100000000 / (exchangeRate || 100));
+      
+      if (!satoshis || Number.isNaN(satoshis) || satoshis <= 0) {
+        throw new Error('Invalid price calculation');
+      }
+      
+      // Create payload for direct registration
+      const payload = {
+        name: nameInput,
+        satoshis: satoshis
+      };
+      
+      // Send payment directly to server for processing
+      const response = await fetch(`${apiUrl}/register-direct`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(data.error || 'Registration failed');
+      }
+      
+      const data = await response.json();
+      
+      // If we get an address to pay, do the wallet payment
+      if (data.address && data.satoshis) {
+        // @ts-expect-error - Yours wallet API doesn't match TypeScript interface
+        const paymentResponse = await wallet.sendBsv({
+          address: data.address,
+          amount: data.satoshis,
+          currency: 'satoshis'
+        });
+        
+        // Handle the response safely
+        const txid = typeof paymentResponse === 'string' ? 
+          paymentResponse : 
+          (paymentResponse && typeof paymentResponse === 'object' && 'txid' in paymentResponse) ? 
+            String(paymentResponse.txid) : null;
+        
+        if (!txid) {
+          throw new Error('Payment failed - no transaction ID returned');
+        }
+        
+        // Notify the server of the successful payment
+        await fetch(`${apiUrl}/payment-complete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: nameInput,
+            txid: txid
+          }),
+        });
+        
+        // Update UI with success
+        setTransaction(txid);
+        const formattedName = `${nameInput}@1sat.name`;
+        onBuy(formattedName);
+      } else {
+        throw new Error('Invalid server response');
+      }
+    } catch (err) {
+      console.error('Error with direct wallet payment:', err);
+      setError(`Payment failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Handle purchase from marketplace using purchaseOrdinal
+  const handleBuyFromMarketplace = async () => {
+    if (!nameStatus?.outpoint) {
+      setError('Missing outpoint for purchase');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const txid = await purchaseOrdinal({
+        outpoint: nameStatus.outpoint,
+      });
+      
+      if (txid) {
+        setTransaction(txid);
+        const formattedName = `${nameInput}@1sat.name`;
+        onBuy(formattedName);
+      } else {
+        throw new Error('No transaction ID returned');
+      }
+    } catch (err) {
+      console.error('Error purchasing from marketplace:', err);
+      setError(`Purchase failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Handle payment with Stripe
+  const handleStripePayment = async () => {
+    if (!nameInput) return;
+    
+    try {
+      localStorage.setItem("pendingNameRegistration", nameInput);
+      await createStripeCheckout(nameInput, priceUsd * 100);
+    } catch (err) {
+      console.error('Error creating checkout session:', err);
+      setError(`Failed to create checkout session: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -522,9 +582,27 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
           {/* Purchase confirmation and success messaging */}
           {transaction && !error && (
             <div className="alert alert-success mt-4">
-              <span>
-                Registration successful! Transaction ID: <span className="font-mono text-xs">{transaction}</span>
-              </span>
+              {transaction === "processing" ? (
+                <div>
+                  <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    className="stroke-current shrink-0 h-6 w-6 mr-2" 
+                    fill="none" 
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>
+                    Payment successful! Your name is being registered on the blockchain.
+                    This process may take a few minutes to complete.
+                  </span>
+                </div>
+              ) : (
+                <span>
+                  Registration successful! Transaction ID: <span className="font-mono text-xs">{transaction}</span>
+                </span>
+              )}
             </div>
           )}
 
