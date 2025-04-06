@@ -4,6 +4,8 @@
 
 1sat.name revolutionizes digital identity by combining Paymail with Bitcoin Ordinals, creating tradable and portable digital identities on the BSV blockchain. Our platform offers user-friendly payment handles that resemble email addresses for seamless transactions.
 
+For an in-depth look at how it all works, check out our [detailed presentation](./1satname.pdf).
+
 ## Core Concepts
 
 - **Ordinal Names**: Each 1sat.name is inscribed as a Bitcoin ordinal, making it a unique digital asset that can be traded, sold, or transferred.
