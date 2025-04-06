@@ -33,7 +33,7 @@ const DomainsPage: FC = () => {
       <h1 className="text-3xl font-bold merriweather-bold mb-6">Supported Domains</h1>
       
       <p className="mb-6">
-        These domains support the 1sat name protocol. Your identity works across all of them.
+        These domains support the 1sat name resolution. Your names work across all of them. Make sure you trust the domain you decide to use.
       </p>
       
       <div className="overflow-x-auto mb-8">

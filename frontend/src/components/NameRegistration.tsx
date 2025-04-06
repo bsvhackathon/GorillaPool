@@ -1,7 +1,7 @@
 import { useState, type FC, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl } from '../constants';
+import { priceUsd, apiUrl, marketApiUrl, marketFeeRate, marketAddress } from '../constants';
 
 interface NameRegistrationProps {
   onBuy: (name: string) => Promise<void>;
@@ -283,8 +283,8 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       formData.append('productId', 'name-registration');
       formData.append('name', name);
       formData.append('price', priceInCents.toString());
-      formData.append('success_url', `${window.location.origin}/registration/success?name=${name}`);
-      formData.append('cancel_url', `${window.location.origin}/registration/cancel`);
+      formData.append('success_url', `${window.location.origin}?success=true`);
+      formData.append('cancel_url', `${window.location.origin}?canceled=true`);
       
       // Include wallet address if available
       if (address) {
@@ -335,8 +335,8 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         const formattedName = `${nameInput}@1sat.name`;
 
         // Calculate marketplace fee (5%)
-        const marketplaceRate = 0.05;
-        const marketplaceAddress = "17dyCLLqGoJNgzDKkVd8c9NkXhjzxius62"; // Example fee address
+        const marketplaceRate = marketFeeRate
+        const marketplaceAddress = marketAddress
 
         console.log(`Purchasing ${formattedName} from marketplace for $${nameStatus.price}`);
 
