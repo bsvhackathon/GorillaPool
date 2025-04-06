@@ -1,12 +1,8 @@
 import { useState, type FC, useEffect, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { useYoursWallet } from 'yours-wallet-provider';
-import { priceUsd, apiUrl, marketApiUrl, marketAddress, marketFeeRate } from '../constants';
+import { priceUsd, apiUrl, marketApiUrl, marketAddress } from '../constants';
 import { useSettings } from '../context/SettingsContext';
-import { Button, Input, Alert, CircularProgress, Typography, Grid, Box } from '@mui/material';
-import { useSearchParams } from 'react-router-dom';
-import { useConnectWallet } from '@bsv/yours-wallet-provider';
-import { domainApp } from '../constants';
 
 interface NameRegistrationProps {
   onBuy: (name: string) => Promise<void>;
@@ -285,47 +281,24 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       setIsLoading(true);
       setError('');
 
-      // First, initiate direct registration with backend to get payment address
-      const directRegResponse = await fetch(`${apiUrl}/register-direct`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: nameInput,
-          satoshis: price * 100000000, // Convert BSV to satoshis
-          address: marketAddress
-        }),
-      });
-
-      if (!directRegResponse.ok) {
-        const errorData = await directRegResponse.json();
-        console.error("Direct registration error:", errorData);
-        setError(errorData.error || 'Failed to register name');
+      if (!wallet || !isConnected) {
+        setError('Wallet is not connected');
         setIsLoading(false);
         return;
       }
 
-      const data = await directRegResponse.json();
-      console.log("Direct registration response:", data);
-
-      // Now send payment with wallet
-      const paymentAmount = data.satoshis;
-      const paymentAddress = data.address;
+      // The price is in USD, need to convert it to BSV and then to satoshis
+      // This calculation assumes 1 USD = 1 BSV for simplicity (exchange rate logic could be added)
+      // 1 BSV = 100,000,000 satoshis
+      const satoshis = Math.floor(price * 100000000); // Convert USD to satoshis
       
-      if (!paymentAddress || !paymentAmount) {
-        setError('Invalid payment details received from server');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log(`Sending ${paymentAmount} satoshis to ${paymentAddress}`);
+      console.log(`Sending ${satoshis} satoshis to ${marketAddress}`);
       
-      // Send payment using the wallet
+      // Send payment directly to market address using the wallet
       const walletResponse = await wallet.sendBsv([
         {
-          address: paymentAddress,
-          satoshis: paymentAmount,
+          address: marketAddress,
+          satoshis: satoshis,
         }
       ]);
 
@@ -338,8 +311,9 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
       console.log("Payment successful:", walletResponse);
       const txid = walletResponse.txid;
 
-      // Notify server that payment is complete
-      const completeResponse = await fetch(`${apiUrl}/payment-complete`, {
+      // Mark the payment as complete by notifying the backend
+      // This will register the name as paid in Redis
+      const paymentCompleteResponse = await fetch(`${apiUrl}/payment-complete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -350,14 +324,50 @@ const NameRegistration: FC<NameRegistrationProps> = ({ onBuy }) => {
         }),
       });
 
-      const completeData = await completeResponse.json();
-      console.log("Complete registration response:", completeData);
-
-      if (!completeResponse.ok) {
-        setError(completeData.error || 'Failed to complete registration after payment');
+      if (!paymentCompleteResponse.ok) {
+        const paymentErrorData = await paymentCompleteResponse.json();
+        console.error("Payment notification error:", paymentErrorData);
+        setError(paymentErrorData.error || 'Failed to notify server of payment');
         setIsLoading(false);
         return;
       }
+
+      const paymentData = await paymentCompleteResponse.json();
+      console.log("Payment notification response:", paymentData);
+
+      // If payment-complete endpoint already handled the registration,
+      // we don't need to call register endpoint again
+      if (paymentData.success) {
+        // Success! Update UI
+        setTransaction(txid);
+        const formattedName = `${nameInput}@1sat.name`;
+        onBuy(formattedName);
+        setIsLoading(false);
+        return;
+      }
+
+      // Fallback to register endpoint if payment-complete didn't handle registration
+      const registerResponse = await fetch(`${apiUrl}/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          handle: nameInput,
+          address: addresses.bsvAddress || '', // Use the user's wallet address for the registration
+        }).toString(),
+      });
+
+      if (!registerResponse.ok) {
+        const errorData = await registerResponse.json();
+        console.error("Registration error:", errorData);
+        setError(errorData.error || 'Failed to register name');
+        setIsLoading(false);
+        return;
+      }
+
+      const registerData = await registerResponse.json();
+      console.log("Registration response:", registerData);
 
       // Success! Update UI
       setTransaction(txid);

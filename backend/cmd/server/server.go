@@ -757,7 +757,7 @@ func main() {
 		var request struct {
 			Name     string `json:"name"`
 			Satoshis int64  `json:"satoshis"`
-			Address  string `json:"address"` // Allow frontend to specify the payment address
+			Address  string `json:"address"` // Required payment address from frontend
 		}
 
 		if err := c.BodyParser(&request); err != nil {
@@ -775,6 +775,12 @@ func main() {
 		if request.Satoshis <= 0 {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Invalid payment amount",
+			})
+		}
+
+		if request.Address == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Payment address is required",
 			})
 		}
 
@@ -802,12 +808,8 @@ func main() {
 			})
 		}
 
-		// Use ONE Market address specified by frontend - this is the correct address
-		// Default to a known valid ONE Market address if not provided
-		var paymentAddress string
-		if request.Address != "" {
-			paymentAddress = request.Address
-		}
+		// Use the market address provided by the frontend
+		paymentAddress := request.Address
 
 		// Store the pending payment information in Redis
 		if err := rdb.HSet(c.Context(), "pending_payments", request.Name, request.Satoshis).Err(); err != nil {
