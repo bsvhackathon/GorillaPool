@@ -271,7 +271,7 @@ func main() {
 
 			return c.JSON(fiber.Map{
 				"address":  address,
-				"outpoint": outputs[0].Outpoint.String(),
+				"outpoint": outputs[0].Outpoint.OrdinalString(),
 			})
 		}
 	})
@@ -296,7 +296,7 @@ func main() {
 			})
 		} else {
 			return c.JSON(fiber.Map{
-				"outpoint": outputs[0].Outpoint.String(),
+				"outpoint": outputs[0].Outpoint.OrdinalString(),
 			})
 		}
 	})
