@@ -182,7 +182,7 @@ const OwnedNames: FC<OwnedNamesProps> = ({ onSell }) => {
           </div>
         ) : ownedNames.length === 0 ? (
           <div className="p-4 bg-base-300 rounded-lg text-center">
-            <p className="text-base-content">You don't own any 1sat.names yet</p>
+            <p className="text-base-content">You are nameless</p>
           </div>
         ) : (
           <div className="space-y-4 mt-4">
